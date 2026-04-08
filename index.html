@@ -637,11 +637,11 @@ tbody tr:hover td{background:var(--glow2)}
       </div>
       <div class="user-card" onclick="selUser('giuliab')">
         <div class="uc-av">GB</div>
-        <div><div class="uc-name">Giulia B.</div><div class="uc-role">👤 Usuário padrão</div></div>
+        <div><div class="uc-name">Giulia B.</div><div class="uc-role">👤 Responsável</div></div>
       </div>
       <div class="user-card" onclick="selUser('larissap')">
         <div class="uc-av">LP</div>
-        <div><div class="uc-name">Larissa P.</div><div class="uc-role">👤 Usuário padrão</div></div>
+        <div><div class="uc-name">Larissa P.</div><div class="uc-role">👤 Responsável</div></div>
       </div>
     </div>
     <div id="login-step2">
@@ -797,6 +797,12 @@ tbody tr:hover td{background:var(--glow2)}
           <select id="ct-lista" style="width:auto;min-width:130px" onchange="renderC()">
             <option value="">Todas listas</option>
           </select>
+          <select id="ct-resp" style="width:auto;min-width:150px" onchange="renderC()">
+            <option value="">Todos responsáveis</option>
+            <option value="Gustavo C.">Gustavo C.</option>
+            <option value="Giulia B.">Giulia B.</option>
+            <option value="Larissa P.">Larissa P.</option>
+          </select>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
           <button class="btn btn-sm" onclick="selTodos()">☑ Todos</button>
@@ -815,6 +821,7 @@ tbody tr:hover td{background:var(--glow2)}
                 <th>Telefone</th>
                 <th>Cidade</th>
                 <th>Lista</th>
+                <th>Responsável</th>
                 <th>Status</th>
                 <th>Ações</th>
               </tr>
@@ -1244,8 +1251,8 @@ function getUsers() {
   } catch(e) {}
   return {
     gustavoc: {name:'Gustavo C.', role:'Master', master:true, pass:btoa('rise123')},
-    giuliab:  {name:'Giulia B.',  role:'Usuário', master:false, pass:btoa('rise123')},
-    larissap: {name:'Larissa P.', role:'Usuário', master:false, pass:btoa('rise123')},
+    giuliab:  {name:'Giulia B.',  role:'Responsável', master:false, pass:btoa('rise123')},
+    larissap: {name:'Larissa P.', role:'Responsável', master:false, pass:btoa('rise123')},
   };
 }
 function saveUsers(u) { localStorage.setItem('rise_users', JSON.stringify(u)); }
@@ -1457,6 +1464,7 @@ function renderC() {
   const st = document.getElementById('ct-status')?.value||'';
   const cid = document.getElementById('ct-cidade')?.value||'';
   const lst = document.getElementById('ct-lista')?.value||'';
+  const resp = document.getElementById('ct-resp')?.value||'';
 
   const listaIds = lst ? (listas.find(l=>String(l.id)===lst)||{contatos:[]}).contatos : null;
 
@@ -1464,6 +1472,7 @@ function renderC() {
     if(srch && !`${c.nome||''} ${c.empresa||''} ${c.tel||''}`.toLowerCase().includes(srch)) return false;
     if(st && c.status!==st) return false;
     if(cid && c.cidade!==cid) return false;
+    if(resp && c.responsavel!==resp) return false;
     if(listaIds && !listaIds.some(lid=>String(lid)===String(c.id))) return false;
     return true;
   });
@@ -1505,6 +1514,12 @@ function renderC() {
       </td>
       <td style="font-size:12px;color:var(--t2)">${esc(c.cidade||'—')}</td>
       <td style="font-size:11px;color:var(--t3)">${esc(cls)}</td>
+      <td>
+        ${c.responsavel
+          ? `<span style="font-size:11px;font-weight:600;color:var(--blue)">${esc(c.responsavel)}</span>`
+          : `<button class="btn btn-xs btn-amber" onclick="atribuirResp(${c.id})">+ Atribuir</button>`
+        }
+      </td>
       <td>${st_badge}</td>
       <td>
         <div style="display:flex;gap:4px">
@@ -1570,9 +1585,38 @@ function handleDrop(e) {
   e.preventDefault();
   document.getElementById('dropzone').classList.remove('drag');
   const f = e.dataTransfer.files[0];
-  if(f) processFile(f, null);
+  if(f) askResponsavelImport(f, null);
 }
-function readFile(inp){ if(inp.files[0]) processFile(inp.files[0], null); inp.value=''; }
+function readFile(inp){ if(inp.files[0]) askResponsavelImport(inp.files[0], null); inp.value=''; }
+
+function askResponsavelImport(file, listaId) {
+  showModal(`
+    <div class="modal-title">👤 Selecionar Responsável</div>
+    <div class="modal-sub">Quem será o responsável pelos contatos de <b>${esc(file.name)}</b>?</div>
+    <div class="field">
+      <label>Responsável *</label>
+      <select id="import-resp-sel">
+        <option value="">— Selecione obrigatório —</option>
+        <option value="Gustavo C.">Gustavo C.</option>
+        <option value="Giulia B.">Giulia B.</option>
+        <option value="Larissa P.">Larissa P.</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="_doImport()">Importar →</button>
+    </div>
+  `);
+  window._pendingImportFile = file;
+  window._pendingImportLista = listaId;
+}
+function _doImport() {
+  const resp = document.getElementById('import-resp-sel')?.value;
+  if(!resp){ toast('Selecione o responsável!','warn'); return; }
+  window._pendingImportResp = resp;
+  closeModal();
+  processFile(window._pendingImportFile, window._pendingImportLista);
+}
 
 function processFile(file, listaId) {
   const r = new FileReader();
@@ -1606,6 +1650,7 @@ function processFile(file, listaId) {
         empresa:gv('empresa','company','razao'),
         cidade:gv('cidade','city','municipio'),
         obs:gv('obs','observ','note'),
+        responsavel: window._pendingImportResp||'',
         status:'pendente',
         addedAt: Date.now()
       };
@@ -1634,6 +1679,35 @@ function openAddModal() {
     </div>
   `);
 }
+function atribuirResp(id) {
+  const c = contacts.find(x=>x.id===id);
+  if(!c) return;
+  showModal(`
+    <div class="modal-title">👤 Atribuir Responsável</div>
+    <div class="modal-sub">${esc(c.nome||fmt(c.tel))}</div>
+    <div class="field">
+      <label>Responsável</label>
+      <select id="atr-resp-sel">
+        <option value="">— Sem responsável —</option>
+        <option value="Gustavo C." ${c.responsavel==='Gustavo C.'?'selected':''}>Gustavo C.</option>
+        <option value="Giulia B." ${c.responsavel==='Giulia B.'?'selected':''}>Giulia B.</option>
+        <option value="Larissa P." ${c.responsavel==='Larissa P.'?'selected':''}>Larissa P.</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="_doAtribuirResp(${id})">Salvar</button>
+    </div>
+  `);
+}
+function _doAtribuirResp(id) {
+  const c = contacts.find(x=>x.id===id);
+  if(!c) return;
+  c.responsavel = document.getElementById('atr-resp-sel')?.value||'';
+  salvarDados(); renderC(); closeModal();
+  toast(c.responsavel ? `Responsável: ${c.responsavel}` : 'Responsável removido');
+}
+
 function addContato() {
   let tel = (document.getElementById('na-tel').value||'').replace(/\D/g,'');
   if(!tel){ toast('Telefone obrigatório','err'); return; }
@@ -2213,7 +2287,7 @@ function remDaLista(listaId, cId) {
   const l=listas.find(x=>x.id===listaId);
   if(l){ l.contatos=l.contatos.filter(i=>i!==cId); salvarDados(); renderListas(); }
 }
-function readFileLista(inp,listaId) { if(inp.files[0]) processFile(inp.files[0], listaId); inp.value=''; }
+function readFileLista(inp,listaId) { if(inp.files[0]) askResponsavelImport(inp.files[0], listaId); inp.value=''; }
 function dispararLista(id) {
   const lista=listas.find(l=>l.id===id);
   if(!lista){ return; }
