@@ -615,6 +615,43 @@ tbody tr:hover td{background:var(--glow2)}
 .pulsing{animation:pulse 1.8s infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spinning{animation:spin .7s linear infinite}
+
+/* ── SLIDERS ── */
+.slider-wrap{margin-bottom:16px}
+.slider-wrap label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);display:block;margin-bottom:10px}
+.slider-val{font-size:22px;font-weight:800;font-family:var(--mono);color:var(--g);text-align:center;line-height:1;margin-bottom:6px}
+.slider-val span{font-size:12px;color:var(--t3);font-weight:400}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;
+  width:100%;height:6px;border-radius:999px;
+  background:var(--s3);outline:none;border:none;
+  cursor:pointer;padding:0;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:22px;height:22px;border-radius:50%;
+  background:var(--g);cursor:pointer;
+  box-shadow:0 0 0 4px rgba(0,230,118,.2),0 2px 8px rgba(0,0,0,.4);
+  transition:box-shadow .15s,transform .15s;
+}
+input[type=range]::-webkit-slider-thumb:hover{
+  box-shadow:0 0 0 7px rgba(0,230,118,.25),0 2px 8px rgba(0,0,0,.4);
+  transform:scale(1.1);
+}
+input[type=range]::-moz-range-thumb{
+  width:22px;height:22px;border-radius:50%;
+  background:var(--g);cursor:pointer;border:none;
+  box-shadow:0 0 0 4px rgba(0,230,118,.2);
+}
+.slider-track{position:relative;height:6px;border-radius:999px;background:var(--s3);margin:8px 0}
+.slider-track-fill{position:absolute;left:0;top:0;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--g2),var(--g));pointer-events:none}
+.limit-badges{display:flex;justify-content:space-between;margin-top:4px}
+.limit-badge{font-size:11px;font-family:var(--mono);font-weight:600;padding:2px 8px;border-radius:999px}
+.limit-badge.min{background:rgba(0,230,118,.12);color:var(--g)}
+.limit-badge.max{background:rgba(64,196,255,.12);color:var(--blue)}
+.limit-badge.mid{color:var(--t3);font-size:10px;align-self:center}
+.qty-slider-val{font-size:28px;font-weight:800;font-family:var(--mono);color:var(--amber);text-align:center;line-height:1;margin-bottom:2px}
+.qty-unlimited{font-size:12px;color:var(--t3);text-align:center;margin-top:2px}
 </style>
 </head>
 <body>
@@ -975,37 +1012,37 @@ tbody tr:hover td{background:var(--glow2)}
         <!-- CONFIGURAÇÕES -->
         <div style="background:var(--s1);border:1px solid var(--bd2);border-radius:var(--r);padding:20px;position:relative;overflow:hidden">
           <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--blue),transparent)"></div>
-          <div style="font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:18px;display:flex;align-items:center;gap:8px">
             <span style="width:28px;height:28px;border-radius:7px;background:rgba(64,196,255,.1);display:flex;align-items:center;justify-content:center;font-size:14px">⏱</span>
             Configurações de Envio
           </div>
 
-          <!-- Intervalo visual -->
-          <div style="margin-bottom:14px">
-            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);display:block;margin-bottom:8px">Intervalo entre mensagens</label>
-            <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center">
-              <div>
-                <div style="font-size:10px;color:var(--t3);margin-bottom:4px;text-align:center">Mínimo (s)</div>
-                <input type="number" id="fire-min" value="10" min="1" oninput="updIntervalChart()" style="text-align:center;font-weight:700;font-size:16px;font-family:var(--mono)">
-              </div>
-              <div style="color:var(--t3);font-size:18px;text-align:center">→</div>
-              <div>
-                <div style="font-size:10px;color:var(--t3);margin-bottom:4px;text-align:center">Máximo (s)</div>
-                <input type="number" id="fire-max" value="25" min="1" oninput="updIntervalChart()" style="text-align:center;font-weight:700;font-size:16px;font-family:var(--mono)">
-              </div>
-            </div>
-            <!-- Gráfico de tendência do intervalo -->
-            <div style="margin-top:10px;background:var(--s2);border-radius:8px;padding:10px 12px;border:1px solid var(--bd2)">
-              <canvas id="interval-chart" height="40" style="width:100%;display:block"></canvas>
-              <div style="display:flex;justify-content:space-between;margin-top:4px">
-                <span id="ic-min-lbl" style="font-size:10px;color:var(--g);font-family:var(--mono)">~10s</span>
-                <span style="font-size:10px;color:var(--t3)">intervalo aleatório</span>
-                <span id="ic-max-lbl" style="font-size:10px;color:var(--blue);font-family:var(--mono)">~25s</span>
-              </div>
-            </div>
+          <!-- Slider Intervalo Mínimo -->
+          <div class="slider-wrap">
+            <label>Intervalo mínimo</label>
+            <div class="slider-val" id="fire-min-val">10 <span>segundos</span></div>
+            <input type="range" id="fire-min" min="1" max="120" value="10" oninput="syncFireSliders()">
+            <div class="limit-badges"><span class="limit-badge min">1s</span><span class="limit-badge mid">mínimo entre envios</span><span class="limit-badge max">120s</span></div>
           </div>
 
-          <div class="field">
+          <!-- Slider Intervalo Máximo -->
+          <div class="slider-wrap">
+            <label>Intervalo máximo</label>
+            <div class="slider-val" id="fire-max-val">25 <span>segundos</span></div>
+            <input type="range" id="fire-max" min="1" max="120" value="25" oninput="syncFireSliders()">
+            <div class="limit-badges"><span class="limit-badge min">1s</span><span class="limit-badge mid">máximo entre envios</span><span class="limit-badge max">120s</span></div>
+          </div>
+
+          <!-- Slider Quantidade -->
+          <div class="slider-wrap">
+            <label>Quantidade a enviar</label>
+            <div class="qty-slider-val" id="fire-qty-val">Todos</div>
+            <div class="qty-unlimited" id="fire-qty-sub">Todos os contatos do alvo</div>
+            <input type="range" id="fire-qty" min="0" max="500" value="0" oninput="syncFireSliders()">
+            <div class="limit-badges"><span class="limit-badge min">Todos</span><span class="limit-badge mid">quantidade de mensagens</span><span class="limit-badge max">500</span></div>
+          </div>
+
+          <div class="field" style="margin-top:4px">
             <label>Número de teste (opcional)</label>
             <input type="text" id="fire-test-num" placeholder="5511999999999">
           </div>
@@ -1101,29 +1138,29 @@ tbody tr:hover td{background:var(--glow2)}
             </div>
           </div>
 
-          <!-- Coluna 2: Intervalo -->
+          <!-- Coluna 2: Intervalo + Quantidade -->
           <div>
-            <div class="field">
-              <label>Intervalo entre mensagens</label>
-              <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:10px">
-                <div>
-                  <div style="font-size:10px;color:var(--t3);margin-bottom:4px;text-align:center">Mín. (s)</div>
-                  <input type="number" id="ag-min" value="10" min="1" oninput="updAgIntervalChart()" style="text-align:center;font-weight:700;font-size:15px;font-family:var(--mono)">
-                </div>
-                <div style="color:var(--t3);font-size:16px;text-align:center;padding-top:18px">→</div>
-                <div>
-                  <div style="font-size:10px;color:var(--t3);margin-bottom:4px;text-align:center">Máx. (s)</div>
-                  <input type="number" id="ag-max" value="25" min="1" oninput="updAgIntervalChart()" style="text-align:center;font-weight:700;font-size:15px;font-family:var(--mono)">
-                </div>
-              </div>
-              <div style="background:var(--s2);border-radius:8px;padding:10px 12px;border:1px solid var(--bd2)">
-                <canvas id="ag-interval-chart" height="40" style="width:100%;display:block"></canvas>
-                <div style="display:flex;justify-content:space-between;margin-top:4px">
-                  <span id="ag-ic-min-lbl" style="font-size:10px;color:var(--g);font-family:var(--mono)">~10s</span>
-                  <span style="font-size:10px;color:var(--t3)">aleatório</span>
-                  <span id="ag-ic-max-lbl" style="font-size:10px;color:var(--blue);font-family:var(--mono)">~25s</span>
-                </div>
-              </div>
+            <!-- Slider Mínimo -->
+            <div class="slider-wrap">
+              <label>Intervalo mínimo</label>
+              <div class="slider-val" id="ag-min-val">10 <span>segundos</span></div>
+              <input type="range" id="ag-min" min="1" max="120" value="10" oninput="syncAgSliders()">
+              <div class="limit-badges"><span class="limit-badge min">1s</span><span class="limit-badge max">120s</span></div>
+            </div>
+            <!-- Slider Máximo -->
+            <div class="slider-wrap">
+              <label>Intervalo máximo</label>
+              <div class="slider-val" id="ag-max-val">25 <span>segundos</span></div>
+              <input type="range" id="ag-max" min="1" max="120" value="25" oninput="syncAgSliders()">
+              <div class="limit-badges"><span class="limit-badge min">1s</span><span class="limit-badge max">120s</span></div>
+            </div>
+            <!-- Slider Quantidade -->
+            <div class="slider-wrap">
+              <label>Quantidade a enviar</label>
+              <div class="qty-slider-val" id="ag-qty-val">Todos</div>
+              <div class="qty-unlimited" id="ag-qty-sub">Todos os contatos do alvo</div>
+              <input type="range" id="ag-qty" min="0" max="500" value="0" oninput="syncAgSliders()">
+              <div class="limit-badges"><span class="limit-badge min">Todos</span><span class="limit-badge max">500</span></div>
             </div>
           </div>
 
@@ -1409,11 +1446,11 @@ function go(tab) {
   if(tab==='contatos') renderC();
   if(tab==='listas') renderListas();
   if(tab==='mensagem') { loadTpl(); updPrev(); }
-  if(tab==='disparo') { updDisparo(); populateFireTpls(); updFirePrev(); setTimeout(()=>updIntervalChart(),50); }
+  if(tab==='disparo') { updDisparo(); populateFireTpls(); updFirePrev(); setTimeout(()=>syncFireSliders(),50); }
   if(tab==='crm') renderCRM();
   if(tab==='relatorio') renderLogs();
   if(tab==='conversa') renderChatList();
-  if(tab==='agendamento') { renderAgendamentos(); populateAgTpls(); updAgPrev(); setTimeout(()=>updAgIntervalChart(),50); }
+  if(tab==='agendamento') { renderAgendamentos(); populateAgTpls(); updAgPrev(); setTimeout(()=>syncAgSliders(),50); }
   if(tab==='config') renderConfig();
   if(tab==='numero') checkNum();
 }
@@ -2146,7 +2183,9 @@ function startFire() {
   if(!base||!key||!inst){ toast('Configure a API primeiro','warn'); return; }
   const list = getFireList();
   if(!list.length){ toast('Nenhum contato no alvo','warn'); return; }
-  fila = list.map(c=>c.id);
+  const fireQty = getFireQty();
+  const fireList = fireQty > 0 ? list.slice(0, fireQty) : list;
+  fila = fireList.map(c=>c.id);
   filaIdx = 0; fireActive = true;
   document.getElementById('fire-btn').disabled = true;
   document.getElementById('fire-banner').style.display='block';
@@ -2257,6 +2296,7 @@ function criarAgendamento() {
     listaId, msg:document.getElementById('ag-msg')?.value||'',
     minInterval:parseInt(document.getElementById('ag-min')?.value||10),
     maxInterval:parseInt(document.getElementById('ag-max')?.value||25),
+    maxQty:getAgQty(),
     status:'pending', createdAt:Date.now()
   });
   salvarDados(); renderAgendamentos(); updBadges();
@@ -2336,7 +2376,8 @@ async function fireAgendamento(ag) {
   } else {
     list=contacts.filter(c=>c.status!=='enviado');
   }
-  toast(`🗓️ Iniciando agendamento: ${ag.nome}`);
+  if(ag.maxQty > 0) list = list.slice(0, ag.maxQty);
+  toast(`🗓️ Iniciando agendamento: ${ag.nome} (${list.length} contatos)`);
   for(const c of list) {
     const text=buildMsg(ag.msg||savedMsg, c);
     const ts=tsNow();
@@ -2977,6 +3018,73 @@ function updFireTimeline() {
       return `<div style="width:${active?10:7}px;height:${active?10:7}px;border-radius:50%;background:${done2?'var(--g)':active?'var(--amber)':'var(--s4)'};border:1px solid ${done2?'var(--g)':active?'var(--amber)':'var(--t3)'};transition:all .3s;${active?'box-shadow:0 0 8px var(--amber)':''}"></div>`;
     }).join('');
   }
+}
+
+// ── SLIDERS DISPARO ──
+function syncFireSliders() {
+  let min = parseInt(document.getElementById('fire-min')?.value||10);
+  let max = parseInt(document.getElementById('fire-max')?.value||25);
+  // Ensure max >= min
+  if(max < min) {
+    max = min;
+    const el = document.getElementById('fire-max');
+    if(el) el.value = max;
+  }
+  const minEl = document.getElementById('fire-min-val');
+  const maxEl = document.getElementById('fire-max-val');
+  if(minEl) minEl.innerHTML = min + ' <span>segundos</span>';
+  if(maxEl) maxEl.innerHTML = max + ' <span>segundos</span>';
+
+  // Quantity
+  const qty = parseInt(document.getElementById('fire-qty')?.value||0);
+  const qtyVal = document.getElementById('fire-qty-val');
+  const qtySub = document.getElementById('fire-qty-sub');
+  if(qtyVal) qtyVal.textContent = qty === 0 ? 'Todos' : qty;
+  if(qtySub) qtySub.textContent = qty === 0 ? 'Todos os contatos do alvo' : qty + ' mensagem(ns)';
+
+  // Update slider track fill colors
+  updSliderFill('fire-min', min, 1, 120);
+  updSliderFill('fire-max', max, 1, 120);
+  updSliderFill('fire-qty', qty, 0, 500, true);
+}
+
+// ── SLIDERS AGENDAMENTO ──
+function syncAgSliders() {
+  let min = parseInt(document.getElementById('ag-min')?.value||10);
+  let max = parseInt(document.getElementById('ag-max')?.value||25);
+  if(max < min) {
+    max = min;
+    const el = document.getElementById('ag-max');
+    if(el) el.value = max;
+  }
+  const minEl = document.getElementById('ag-min-val');
+  const maxEl = document.getElementById('ag-max-val');
+  if(minEl) minEl.innerHTML = min + ' <span>segundos</span>';
+  if(maxEl) maxEl.innerHTML = max + ' <span>segundos</span>';
+
+  const qty = parseInt(document.getElementById('ag-qty')?.value||0);
+  const qtyVal = document.getElementById('ag-qty-val');
+  const qtySub = document.getElementById('ag-qty-sub');
+  if(qtyVal) qtyVal.textContent = qty === 0 ? 'Todos' : qty;
+  if(qtySub) qtySub.textContent = qty === 0 ? 'Todos os contatos do alvo' : qty + ' mensagem(ns)';
+
+  updSliderFill('ag-min', min, 1, 120);
+  updSliderFill('ag-max', max, 1, 120);
+  updSliderFill('ag-qty', qty, 0, 500, true);
+}
+
+function updSliderFill(id, val, min, max, amber) {
+  const el = document.getElementById(id);
+  if(!el) return;
+  const pct = ((val-min)/(max-min))*100;
+  el.style.background = `linear-gradient(90deg, ${amber?'var(--amber)':'var(--g)'} ${pct}%, var(--s3) ${pct}%)`;
+}
+
+function getFireQty() {
+  return parseInt(document.getElementById('fire-qty')?.value||0) || 0;
+}
+function getAgQty() {
+  return parseInt(document.getElementById('ag-qty')?.value||0) || 0;
 }
 </script>
 </body>
