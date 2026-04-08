@@ -1214,7 +1214,7 @@ input[type=range]::-moz-range-thumb{
 
     <!-- ══════════ CRM ══════════ -->
     <div class="panel" id="panel-crm">
-      <div class="grid4 mb-4">
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px">
         <div class="stat-card stat-amber">
           <div class="stat-num" id="cs-nr">0</div>
           <div class="stat-label">Não respondeu</div>
@@ -1231,12 +1231,20 @@ input[type=range]::-moz-range-thumb{
           <div class="stat-num" id="cs-cv">0</div>
           <div class="stat-label">Convertido</div>
         </div>
+        <div class="stat-card stat-red">
+          <div class="stat-num" id="cs-si">0</div>
+          <div class="stat-label">Sem Interesse</div>
+        </div>
       </div>
       <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
         <div class="search-bar" style="flex:1;min-width:200px;margin-bottom:0">
           <span class="search-icon">🔍</span>
           <input type="text" id="crm-search" placeholder="Buscar no CRM..." oninput="renderCRM()">
         </div>
+        <select id="crm-col-filter" style="width:auto;min-width:160px" onchange="renderCRM()">
+          <option value="">Todas as colunas</option>
+        </select>
+        <button class="btn btn-sm btn-blue" onclick="addCRMCol()">+ Nova coluna</button>
         <button class="btn btn-sm" onclick="expCRM()">⬇ Exportar CRM</button>
       </div>
       <div class="crm-col-wrap" id="crm-kanban"></div>
@@ -1331,7 +1339,9 @@ input[type=range]::-moz-range-thumb{
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-sm btn-blue" onclick="testConn()">🧪 Testar conexão</button>
           <button class="btn btn-primary btn-sm" onclick="saveConf()">💾 Salvar</button>
+          <button class="btn btn-sm btn-amber" onclick="setupWebhook()">🔔 Configurar Webhook</button>
         </div>
+        <div style="font-size:11px;color:var(--t3);margin-top:8px">💡 O Webhook permite receber respostas diretamente no sistema (aba Conversas)</div>
         <div id="cf-status" style="margin-top:10px;font-size:12px"></div>
       </div>
       <div class="card">
@@ -1384,13 +1394,21 @@ const TABS = {
   config:   ['Configurações','API e configurações do sistema'],
 };
 
-const CRM_COLS = [
+const CRM_COLS_DEFAULT = [
   {id:'naoresp', label:'Não Respondeu', color:'var(--t3)'},
   {id:'abertura', label:'Abordagem', color:'var(--blue)'},
   {id:'agendado', label:'Agendado', color:'var(--amber)'},
   {id:'followup', label:'Follow-up', color:'var(--purple)'},
   {id:'convertido', label:'Convertido ✓', color:'var(--g)'},
+  {id:'seminteresse', label:'Sem Interesse', color:'var(--red)'},
 ];
+// CRM_COLS pode ser estendido com colunas customizadas
+let crmCustomCols = [];
+function getCRMCols() {
+  return [...CRM_COLS_DEFAULT, ...crmCustomCols];
+}
+// Alias para compatibilidade
+const CRM_COLS = CRM_COLS_DEFAULT;
 
 // ── STATE ──
 let contacts = [];
@@ -1523,6 +1541,7 @@ function iniciarApp() {
   }
   loadCfgToForm();
   carregarDados().then(()=>{
+    startPolling();
     renderC();
     updBadges();
     startAgTimer();
@@ -2589,23 +2608,41 @@ function addCRM(c) {
 }
 function renderCRM() {
   const srch=(document.getElementById('crm-search')?.value||'').toLowerCase();
-  const filtered=crmData.filter(c=>!srch||`${c.nome||''} ${c.empresa||''} ${c.tel||''}`.toLowerCase().includes(srch));
+  const colF=document.getElementById('crm-col-filter')?.value||'';
+  let filtered=crmData.filter(c=>!srch||`${c.nome||''} ${c.empresa||''} ${c.tel||''}`.toLowerCase().includes(srch));
 
   // Stats
-  document.getElementById('cs-nr').textContent=filtered.filter(c=>c.status==='naoresp').length;
-  document.getElementById('cs-ab').textContent=filtered.filter(c=>c.status==='abertura').length;
-  document.getElementById('cs-ag').textContent=filtered.filter(c=>c.status==='agendado').length;
-  document.getElementById('cs-cv').textContent=filtered.filter(c=>c.status==='convertido').length;
+  document.getElementById('cs-nr').textContent=crmData.filter(c=>c.status==='naoresp').length;
+  document.getElementById('cs-ab').textContent=crmData.filter(c=>c.status==='abertura').length;
+  document.getElementById('cs-ag').textContent=crmData.filter(c=>c.status==='agendado').length;
+  document.getElementById('cs-cv').textContent=crmData.filter(c=>c.status==='convertido').length;
+  const siEl=document.getElementById('cs-si');
+  if(siEl) siEl.textContent=crmData.filter(c=>c.status==='seminteresse').length;
 
+  // Populate column filter
+  const cf=document.getElementById('crm-col-filter');
+  if(cf){
+    const cur=cf.value;
+    cf.innerHTML='<option value="">Todas as colunas</option>';
+    getCRMCols().forEach(col=>{
+      const o=document.createElement('option');
+      o.value=col.id; o.textContent=col.label; cf.appendChild(o);
+    });
+    cf.value=cur;
+  }
+
+  const cols = colF ? getCRMCols().filter(c=>c.id===colF) : getCRMCols();
   const wrap=document.getElementById('crm-kanban');
   if(!wrap) return;
-  wrap.innerHTML=CRM_COLS.map(col=>{
+  wrap.innerHTML=cols.map(col=>{
     const items=filtered.filter(c=>c.status===col.id);
+    const isCustom=crmCustomCols.find(x=>x.id===col.id);
     return `<div class="crm-col">
       <div class="crm-col-header">
         <span style="width:8px;height:8px;border-radius:50%;background:${col.color};display:inline-block;flex-shrink:0"></span>
         ${esc(col.label)}
         <span style="margin-left:auto;background:var(--s3);padding:1px 6px;border-radius:999px;font-size:10px">${items.length}</span>
+        ${isCustom?`<button onclick="delCRMCol('${col.id}')" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:12px;padding:0 0 0 4px" title="Remover coluna">✕</button>`:''}
       </div>
       <div class="crm-col-body">
         ${items.map(c=>`<div class="crm-card" onclick="editCRM('${c.id}')">
@@ -3349,6 +3386,144 @@ function _confirmDispararAgNow(agId) {
   ag.status = 'firing';
   fireAgendamento(ag);
   toast('Disparando agendamento...');
+}
+
+// ── CRM COLUNAS CUSTOMIZADAS ──
+function addCRMCol() {
+  showModal(`
+    <div class="modal-title">➕ Nova Coluna CRM</div>
+    <div class="modal-sub">Adicione uma etapa personalizada ao seu funil</div>
+    <div class="field">
+      <label>Nome da coluna</label>
+      <input type="text" id="new-col-name" placeholder="Ex: Proposta enviada, Negociando..." onkeydown="if(event.key==='Enter')_doAddCRMCol()">
+    </div>
+    <div class="field">
+      <label>Cor</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['#00e676','#40c4ff','#ffab40','#ce93d8','#ff5252','#80cbc4','#f48fb1','#ffe082'].map(cor=>
+          `<div onclick="document.getElementById('new-col-color').value='${cor}';document.querySelectorAll('.color-dot').forEach(d=>d.style.outline='none');this.style.outline='2px solid #fff'"
+            class="color-dot"
+            style="width:28px;height:28px;border-radius:50%;background:${cor};cursor:pointer;flex-shrink:0"></div>`
+        ).join('')}
+        <input type="color" id="new-col-color" value="#40c4ff" style="width:36px;height:28px;padding:0;border-radius:6px;cursor:pointer;background:none">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="_doAddCRMCol()">Criar coluna</button>
+    </div>
+  `);
+  setTimeout(()=>document.getElementById('new-col-name')?.focus(),100);
+}
+function _doAddCRMCol() {
+  const name=(document.getElementById('new-col-name')?.value||'').trim();
+  if(!name){toast('Nome obrigatório','warn');return;}
+  const color=document.getElementById('new-col-color')?.value||'#40c4ff';
+  const id='custom_'+uid();
+  crmCustomCols.push({id, label:name, color});
+  salvarDados(); renderCRM(); closeModal();
+  toast(`Coluna "${name}" criada ✓`);
+}
+function delCRMCol(id) {
+  showModal(`
+    <div class="modal-title">⚠️ Remover coluna</div>
+    <p class="modal-sub">Os cards desta coluna ficarão sem status. Continuar?</p>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger btn-sm" onclick="_doDelCRMCol('${id}')">Remover</button>
+    </div>
+  `);
+}
+function _doDelCRMCol(id) {
+  crmCustomCols=crmCustomCols.filter(c=>c.id!==id);
+  salvarDados(); renderCRM(); closeModal();
+  toast('Coluna removida');
+}
+
+// ── WEBHOOK: RECEBER MENSAGENS ──
+// Configura webhook na Evolution API para receber mensagens no sistema
+async function setupWebhook() {
+  const base=getApiBase();const key=getApiKey();const inst=getInst();
+  if(!base||!key||!inst){toast('Configure a API primeiro','warn');return;}
+  // URL do webhook aponta para a Vercel function
+  const webhookUrl = window.location.origin+'/api/webhook';
+  try {
+    const res=await fetch(`${base}/webhook/set/${inst}`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':key},
+      body:JSON.stringify({
+        url: webhookUrl,
+        webhook_by_events: true,
+        webhook_base64: false,
+        events:['MESSAGES_UPSERT']
+      })
+    });
+    if(res.ok){toast('Webhook configurado ✓ — mensagens chegarão ao sistema');}
+    else{toast('Erro ao configurar webhook','err');}
+  } catch(e){toast('Erro: '+e.message,'err');}
+}
+
+// Processar mensagem recebida via webhook
+function receberMensagem(data) {
+  try {
+    const msg = data?.data;
+    if(!msg||msg.key?.fromMe) return; // Ignorar mensagens próprias
+    const tel = (msg.key?.remoteJid||'').replace('@s.whatsapp.net','').replace('@g.us','');
+    if(!tel) return;
+    const text = msg.message?.conversation
+      || msg.message?.extendedTextMessage?.text
+      || msg.message?.imageMessage?.caption
+      || '[mídia]';
+    const ts = tsNow();
+    // Adicionar ao chatLogs
+    const contact = contacts.find(c=>c.tel===tel||c.tel===('55'+tel));
+    const cId = contact?.id||tel;
+    if(!chatLogs[cId]) chatLogs[cId]=[];
+    chatLogs[cId].push({text, dir:'in', time:ts});
+    // Notificar
+    if(contact){
+      toast(`💬 ${contact.nome||fmt(tel)}: ${text.slice(0,40)}...`,'info');
+    }
+    // Atualizar conversa se estiver aberta
+    if(chatContact?.tel===tel||chatContact?.tel===('55'+tel)){
+      renderChatHistory();
+    }
+    renderChatList();
+    // Adicionar ao CRM automaticamente se já enviou mensagem
+    if(contact&&contact.status==='enviado'){
+      if(!crmData.find(x=>x.contactId===contact.id)){
+        addCRM(contact);
+        renderCRM();
+        salvarDados();
+      }
+    }
+  } catch(e){ console.warn('Webhook error:', e); }
+}
+
+// Polling de mensagens (alternativa ao webhook)
+let pollTimer = null;
+let lastPollTs = Date.now();
+async function startPolling() {
+  if(pollTimer) return;
+  pollTimer = setInterval(async()=>{
+    const base=getApiBase();const key=getApiKey();const inst=getInst();
+    if(!base||!key||!inst) return;
+    try {
+      const res=await fetch(`${base}/chat/findMessages/${inst}`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','apikey':key},
+        body:JSON.stringify({where:{messageTimestamp:{$gte:Math.floor(lastPollTs/1000)}}})
+      });
+      if(!res.ok) return;
+      const d=await res.json();
+      const msgs=Array.isArray(d)?d:(d?.messages||[]);
+      msgs.forEach(msg=>{
+        if(msg.key?.fromMe) return;
+        receberMensagem({data:msg});
+      });
+      lastPollTs=Date.now();
+    } catch(e){}
+  }, 15000); // Verifica a cada 15 segundos
 }
 </script>
 </body>
