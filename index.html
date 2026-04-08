@@ -752,12 +752,13 @@ input[type=range]::-moz-range-thumb{
     </div>
   </nav>
   <div class="sidebar-footer">
-    <div class="user-pill" id="user-pill">
+    <div class="user-pill" id="user-pill" onclick="openUserMenu()" style="cursor:pointer" title="Opções do usuário">
       <div class="user-av" id="user-av">--</div>
-      <div>
+      <div style="flex:1;min-width:0">
         <div class="user-info-name" id="user-name">Usuário</div>
         <div class="user-info-role" id="user-role">Carregando...</div>
       </div>
+      <div style="color:var(--t3);font-size:14px;flex-shrink:0">⋯</div>
     </div>
   </div>
 </div>
@@ -3085,6 +3086,85 @@ function getFireQty() {
 }
 function getAgQty() {
   return parseInt(document.getElementById('ag-qty')?.value||0) || 0;
+}
+
+// ── LOGOUT / TROCAR USUÁRIO ──
+function openUserMenu() {
+  const u = currentUser;
+  showModal(`
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--bd2)">
+      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--g2),#003820);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--g);font-family:var(--mono);flex-shrink:0">${esc((u?.key||'?').slice(0,2).toUpperCase())}</div>
+      <div>
+        <div style="font-size:15px;font-weight:700">${esc(u?.name||'Usuário')}</div>
+        <div style="font-size:12px;color:var(--t3)">${esc(u?.role||'')} • ${esc(u?.key||'')}</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn" style="justify-content:flex-start;gap:12px;padding:12px 14px" onclick="closeModal();go('config')">
+        <span style="font-size:16px">⚙️</span>
+        <div style="text-align:left"><div style="font-weight:600">Configurações</div><div style="font-size:11px;color:var(--t3)">API, usuários e banco de dados</div></div>
+      </button>
+      <button class="btn" style="justify-content:flex-start;gap:12px;padding:12px 14px" onclick="closeModal();openChangePwdSelf()">
+        <span style="font-size:16px">🔑</span>
+        <div style="text-align:left"><div style="font-weight:600">Alterar minha senha</div><div style="font-size:11px;color:var(--t3)">Trocar senha de acesso</div></div>
+      </button>
+      <button class="btn" style="justify-content:flex-start;gap:12px;padding:12px 14px" onclick="closeModal();trocarUsuario()">
+        <span style="font-size:16px">👥</span>
+        <div style="text-align:left"><div style="font-weight:600">Trocar usuário</div><div style="font-size:11px;color:var(--t3)">Entrar com outra conta</div></div>
+      </button>
+      <button class="btn btn-danger" style="justify-content:flex-start;gap:12px;padding:12px 14px;margin-top:4px" onclick="closeModal();doLogout()">
+        <span style="font-size:16px">🚪</span>
+        <div style="text-align:left"><div style="font-weight:600">Sair</div><div style="font-size:11px;color:rgba(255,82,82,.7)">Encerrar sessão</div></div>
+      </button>
+    </div>
+  `);
+}
+
+function doLogout() {
+  localStorage.removeItem('rise_session');
+  currentUser = null;
+  document.getElementById('login-screen').style.display='flex';
+  document.getElementById('pwd-input').value='';
+  document.getElementById('login-err').textContent='';
+  document.getElementById('login-step1').style.display='block';
+  document.getElementById('login-step2').style.display='none';
+  document.querySelectorAll('.user-card').forEach(el=>el.classList.remove('sel'));
+  selUsuario = null;
+  toast('Sessão encerrada');
+}
+
+function trocarUsuario() {
+  doLogout();
+}
+
+function openChangePwdSelf() {
+  if(!currentUser) return;
+  showModal(`
+    <div class="modal-title">🔑 Alterar minha senha</div>
+    <div class="modal-sub">Usuário: ${esc(currentUser.name)}</div>
+    <div class="field"><label>Senha atual</label><input type="password" id="cp-atual" placeholder="••••••••"></div>
+    <div class="field"><label>Nova senha</label><input type="password" id="cp-nova" placeholder="••••••••"></div>
+    <div class="field"><label>Confirmar nova senha</label><input type="password" id="cp-conf" placeholder="••••••••"></div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="_doChangePwdSelf()">Salvar</button>
+    </div>
+  `);
+}
+
+function _doChangePwdSelf() {
+  const atual = document.getElementById('cp-atual')?.value;
+  const nova  = document.getElementById('cp-nova')?.value;
+  const conf  = document.getElementById('cp-conf')?.value;
+  const users = getUsers();
+  const u = users[currentUser.key];
+  if(!u || btoa(atual) !== u.pass){ toast('Senha atual incorreta','err'); return; }
+  if(!nova || nova.length < 4){ toast('Nova senha muito curta','warn'); return; }
+  if(nova !== conf){ toast('Senhas não coincidem','err'); return; }
+  u.pass = btoa(nova);
+  saveUsers(users);
+  closeModal();
+  toast('Senha alterada com sucesso ✓');
 }
 </script>
 </body>
