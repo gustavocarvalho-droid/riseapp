@@ -27,14 +27,9 @@ async function ensureTable(client) {
       agendamentos JSONB DEFAULT '[]',
       savedmsg TEXT DEFAULT '',
       config JSONB DEFAULT '{}',
-      auditlogs JSONB DEFAULT '[]',
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
-  // Garante colunas novas em tabelas ja existentes
-  await client.query(`ALTER TABLE rise_dados ADD COLUMN IF NOT EXISTS auditlogs JSONB DEFAULT '[]'`);
-  await client.query(`ALTER TABLE rise_dados ADD COLUMN IF NOT EXISTS agendamentos JSONB DEFAULT '[]'`);
-  await client.query(`ALTER TABLE rise_dados ADD COLUMN IF NOT EXISTS config JSONB DEFAULT '{}'`);
 }
 
 export default async function handler(req, res) {
@@ -71,19 +66,18 @@ export default async function handler(req, res) {
         fila: d.fila || [],
         agendamentos: d.agendamentos || [],
         savedmsg: d.savedmsg || '',
-        config: d.config || {},
-        auditlogs: d.auditlogs || []
+        config: d.config || {}
       });
     }
 
     if (req.method === 'POST') {
-      const { contacts, listas, logs, crm, fila, agendamentos, savedmsg, config, auditlogs } = req.body || {};
+      const { contacts, listas, logs, crm, fila, agendamentos, savedmsg, config } = req.body || {};
       await client.query(`
-        INSERT INTO rise_dados (user_key, contacts, listas, logs, crm, fila, agendamentos, savedmsg, config, auditlogs, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+        INSERT INTO rise_dados (user_key, contacts, listas, logs, crm, fila, agendamentos, savedmsg, config, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
         ON CONFLICT (user_key) DO UPDATE SET
           contacts=$2, listas=$3, logs=$4, crm=$5, fila=$6,
-          agendamentos=$7, savedmsg=$8, config=$9, auditlogs=$10, updated_at=NOW()
+          agendamentos=$7, savedmsg=$8, config=$9, updated_at=NOW()
       `, [
         userKey,
         JSON.stringify(contacts || []),
@@ -93,8 +87,7 @@ export default async function handler(req, res) {
         JSON.stringify(fila || []),
         JSON.stringify(agendamentos || []),
         savedmsg || '',
-        JSON.stringify(config || {}),
-        JSON.stringify(auditlogs || [])
+        JSON.stringify(config || {})
       ]);
       return res.status(200).json({ ok: true });
     }

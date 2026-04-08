@@ -706,9 +706,6 @@ tbody tr:hover td{background:var(--glow2)}
     <div class="nav-item" id="mn-relatorio" onclick="go('relatorio')">
       <span class="nav-icon">📈</span>Relatório
     </div>
-    <div class="nav-item" id="mn-historico" onclick="go('historico')">
-      <span class="nav-icon">🕵️</span>Histórico
-    </div>
     <div class="nav-section">Sistema</div>
     <div class="nav-item" id="mn-numero" onclick="go('numero')">
       <span class="nav-icon">📱</span>Meu Número
@@ -1115,44 +1112,6 @@ tbody tr:hover td{background:var(--glow2)}
       </div>
     </div>
 
-    <!-- ══════════ HISTÓRICO ══════════ -->
-    <div class="panel" id="panel-historico">
-      <div class="card">
-        <div class="card-title"><span class="icon">🕵️</span>Histórico de Atividades</div>
-        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-          <select id="hist-user-filter" style="width:auto;min-width:160px" onchange="renderHistorico()">
-            <option value="">Todos os usuários</option>
-          </select>
-          <select id="hist-type-filter" style="width:auto;min-width:160px" onchange="renderHistorico()">
-            <option value="">Todas as ações</option>
-            <option value="login">Login</option>
-            <option value="import">Importação</option>
-            <option value="send">Envio</option>
-            <option value="disparo">Disparo</option>
-            <option value="contato">Contato</option>
-            <option value="lista">Lista</option>
-            <option value="crm">CRM</option>
-            <option value="config">Configuração</option>
-          </select>
-          <button class="btn btn-sm btn-danger" onclick="limparHistorico()">🗑 Limpar</button>
-          <button class="btn btn-sm" onclick="expHistorico()">⬇ Exportar</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Data/Hora</th>
-                <th>Usuário</th>
-                <th>Ação</th>
-                <th>Detalhe</th>
-              </tr>
-            </thead>
-            <tbody id="hist-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
     <!-- ══════════ NÚMERO ══════════ -->
     <div class="panel" id="panel-numero">
       <div class="grid2">
@@ -1245,7 +1204,6 @@ const TABS = {
   listas:   ['Listas','Organize contatos em grupos'],
   crm:      ['CRM','Acompanhe o funil de vendas'],
   relatorio:['Relatório','Histórico de envios'],
-  historico:['Histórico','Registro de atividades por usuário'],
   numero:   ['Meu Número','Status e QR Code'],
   config:   ['Configurações','API e configurações do sistema'],
 };
@@ -1276,7 +1234,6 @@ let chatLogs = {};
 let ctPage = 0;
 const CT_PER_PAGE = 50;
 let agTimer = null;
-let auditLogs = [];
 
 // ── USERS ──
 function getUsers() {
@@ -1324,7 +1281,6 @@ function go(tab) {
   if(tab==='agendamento') renderAgendamentos();
   if(tab==='config') renderConfig();
   if(tab==='numero') checkNum();
-  if(tab==='historico') renderHistorico();
 }
 
 // ── SIDEBAR ──
@@ -1381,7 +1337,6 @@ function doLogin() {
 }
 function iniciarApp() {
   document.getElementById('login-screen').style.display='none';
-  addAudit('login', 'Login no sistema');
   const u = currentUser;
   document.getElementById('user-av').textContent = u.name.split(' ').map(w=>w[0]).join('').slice(0,2);
   document.getElementById('user-name').textContent = u.name;
@@ -1426,7 +1381,7 @@ async function _saveNeon() {
     const res = await fetch('/api/dados', {
       method:'POST',
       headers:{'Content-Type':'application/json','x-user-key':currentUser?.key||'default'},
-      body:JSON.stringify({contacts,listas,logs,crm:crmData,fila,agendamentos,savedmsg:savedMsg,config:{tpls},auditlogs:auditLogs})
+      body:JSON.stringify({contacts,listas,logs,crm:crmData,fila,agendamentos,savedmsg:savedMsg,config:{tpls}})
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
     if(ind){ind.style.opacity='1';setTimeout(()=>ind.style.opacity='0',2000);}
@@ -1442,7 +1397,6 @@ async function carregarDados() {
     if(!res.ok) return;
     const d = await res.json();
     contacts = d.contacts||[];
-    auditLogs = d.auditlogs||[];
     listas = d.listas||[];
     logs = d.logs||[];
     crmData = d.crm||[];
@@ -1542,9 +1496,9 @@ function renderC() {
       </td>
       <td>
         <div style="display:flex;align-items:center;gap:6px">
-          <a href="https://wa.me/${c.tel}" target="_blank" style="color:var(--g);text-decoration:none;font-family:var(--mono);font-size:12px;display:flex;align-items:center;gap:5px">
+          <a href="javascript:openChat(${c.id})" style="color:var(--g);text-decoration:none;font-family:var(--mono);font-size:12px">${esc(fmt(c.tel))}</a>
+          <a href="https://wa.me/${c.tel}" target="_blank" title="Abrir no WhatsApp" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:rgba(0,230,118,.15);color:var(--g);text-decoration:none;flex-shrink:0;font-size:13px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-            ${esc(fmt(c.tel))}
           </a>
         </div>
       </td>
@@ -1589,7 +1543,7 @@ function deselTodos(){ document.querySelectorAll('.c-chk').forEach(c=>c.checked=
 function selTodosChk(el){ document.querySelectorAll('.c-chk').forEach(c=>c.checked=el.checked); updSel(); }
 
 function delContato(id) {
-  const _dc=contacts.find(c=>c.id===id); addAudit('contato', `Contato removido: ${_dc?.nome||_dc?.tel||id}`); contacts = contacts.filter(c=>c.id!==id);
+  contacts = contacts.filter(c=>c.id!==id);
   listas.forEach(l=>{ l.contatos=l.contatos.filter(i=>i!==id); });
   crmData = crmData.filter(x=>x.contactId!==id);
   renderC(); updBadges(); salvarDados();
@@ -1658,7 +1612,7 @@ function processFile(file, listaId) {
       if(listaId){ const l=listas.find(l=>l.id===listaId); if(l)l.contatos.push(c.id); }
       added++;
     });
-    addAudit('import', `${added} contato(s) importado(s) de ${file.name||'planilha'}`); salvarImediato().then(()=>{ renderC(); updBadges(); toast(`${added} contato(s) importado(s)${dup?`, ${dup} duplicado(s) ignorado(s)`:''}`); });
+    salvarImediato().then(()=>{ renderC(); updBadges(); toast(`${added} contato(s) importado(s)${dup?`, ${dup} duplicado(s) ignorado(s)`:''}`); });
   };
   r.readAsBinaryString(file);
 }
@@ -1691,7 +1645,7 @@ function addContato() {
     cidade:document.getElementById('na-cid').value,
     status:'pendente', addedAt:Date.now()
   });
-  addAudit('contato', `Contato adicionado: ${document.getElementById('na-nome')?.value||tel}`); salvarImediato(); renderC(); updBadges(); closeModal(); toast('Contato adicionado');
+  salvarImediato(); renderC(); updBadges(); closeModal(); toast('Contato adicionado');
 }
 
 function addSelecionadosModal() {
@@ -1837,7 +1791,7 @@ async function doSendMsg(cId, text) {
     if(ok) {
       c.status='enviado';
       logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'enviado',msg:text.slice(0,60)});
-      addAudit('send', `Mensagem enviada para ${c.nome||fmt(c.tel)}`); toast('Mensagem enviada ✓');
+      toast('Mensagem enviada ✓');
     } else {
       logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:text.slice(0,60)});
       toast('Falha ao enviar','err');
@@ -1987,7 +1941,7 @@ function startFire() {
   if(!base||!key||!inst){ toast('Configure a API primeiro','warn'); return; }
   const list = getFireList();
   if(!list.length){ toast('Nenhum contato no alvo','warn'); return; }
-  addAudit('disparo', `Disparo iniciado: ${list.length} contatos`); fila = list.map(c=>c.id);
+  fila = list.map(c=>c.id);
   filaIdx = 0; fireActive = true;
   document.getElementById('fire-btn').disabled = true;
   document.getElementById('fire-banner').style.display='block';
@@ -2102,7 +2056,7 @@ function criarAgendamento() {
   document.getElementById('ag-data').value='';
   document.getElementById('ag-hora').value='';
   document.getElementById('ag-msg').value='';
-  addAudit('agendamento', `Agendamento criado: ${nome} para ${data} ${hora}`); toast(`Agendamento "${nome}" criado`);
+  toast(`Agendamento "${nome}" criado`);
 }
 function renderAgendamentos() {
   const wrap=document.getElementById('ag-list');
@@ -2200,7 +2154,7 @@ function criarLista() {
   const nome=(document.getElementById('lista-nome-input')?.value||'').trim();
   if(!nome){ toast('Nome obrigatório','warn'); return; }
   if(listas.find(l=>l.nome===nome)){ toast('Lista já existe','warn'); return; }
-  listas.push({id:Date.now(), nome, contatos:[], createdAt:Date.now()}); addAudit('lista', `Lista criada: ${nome}`);
+  listas.push({id:Date.now(), nome, contatos:[], createdAt:Date.now()});
   document.getElementById('lista-nome-input').value='';
   salvarDados(); renderListas(); updBadges(); toast(`Lista "${nome}" criada`);
 }
@@ -2336,7 +2290,7 @@ function _saveCRM(id) {
   item.status=document.getElementById('crm-st-sel')?.value;
   item.nota=document.getElementById('crm-nota-inp')?.value;
   item.updatedAt=Date.now();
-  addAudit('crm', `CRM atualizado: ${item.nome||item.tel} → ${item.status}`); salvarDados(); renderCRM(); updBadges(); closeModal(); toast('CRM atualizado');
+  salvarDados(); renderCRM(); updBadges(); closeModal(); toast('CRM atualizado');
 }
 function delCRM(id) {
   crmData=crmData.filter(c=>String(c.id)!==String(id));
@@ -2468,7 +2422,7 @@ function saveConf() {
     key:(document.getElementById('cf-key')?.value||'').trim(),
     inst:(document.getElementById('cf-inst')?.value||'').trim()
   });
-  addAudit('config', 'Configurações da API salvas'); toast('Configurações salvas ✓');
+  toast('Configurações salvas ✓');
   checkNum();
 }
 async function testConn() {
@@ -2613,91 +2567,6 @@ document.getElementById('ag-target')?.addEventListener('change', function(){
 // Handle fire target change
 document.getElementById('fire-target')?.addEventListener('change', updDisparo);
 document.getElementById('fire-lista-sel')?.addEventListener('change', updDisparo);
-
-// ── AUDIT LOG ──
-function addAudit(type, detail) {
-  if(!currentUser) return;
-  auditLogs.unshift({
-    id: uid(),
-    time: tsNow(),
-    user: currentUser.key,
-    userName: currentUser.name,
-    type,
-    detail: detail||''
-  });
-  if(auditLogs.length > 500) auditLogs = auditLogs.slice(0, 500);
-  salvarDados();
-}
-
-function renderHistorico() {
-  // Populate user filter
-  const uf = document.getElementById('hist-user-filter');
-  if(uf) {
-    const cur = uf.value;
-    const users = [...new Set(auditLogs.map(a=>a.user))];
-    uf.innerHTML = '<option value="">Todos os usuários</option>';
-    users.forEach(u => {
-      const name = auditLogs.find(a=>a.user===u)?.userName||u;
-      const o = document.createElement('option');
-      o.value=u; o.textContent=name; uf.appendChild(o);
-    });
-    uf.value = cur;
-  }
-
-  const userF = document.getElementById('hist-user-filter')?.value||'';
-  const typeF = document.getElementById('hist-type-filter')?.value||'';
-
-  const filtered = auditLogs.filter(a => {
-    if(userF && a.user !== userF) return false;
-    if(typeF && a.type !== typeF) return false;
-    return true;
-  });
-
-  const typeIcons = {
-    login:'🔑', import:'📤', send:'📨', disparo:'🚀',
-    contato:'👤', lista:'📋', crm:'📊', config:'⚙️', agendamento:'🗓️'
-  };
-  const typeLabels = {
-    login:'Login', import:'Importação', send:'Envio individual',
-    disparo:'Disparo', contato:'Contato', lista:'Lista',
-    crm:'CRM', config:'Configuração', agendamento:'Agendamento'
-  };
-
-  const tbody = document.getElementById('hist-tbody');
-  if(!tbody) return;
-
-  tbody.innerHTML = filtered.slice(0,300).map(a => `<tr>
-    <td style="font-family:var(--mono);font-size:11px;white-space:nowrap">${esc(a.time)}</td>
-    <td>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div style="width:24px;height:24px;border-radius:6px;background:var(--glow);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--g);flex-shrink:0;font-family:var(--mono)">${esc((a.user||'?').slice(0,2).toUpperCase())}</div>
-        <span style="font-size:12px;font-weight:600">${esc(a.userName||a.user)}</span>
-      </div>
-    </td>
-    <td><span class="badge badge-dim">${typeIcons[a.type]||'•'} ${typeLabels[a.type]||esc(a.type)}</span></td>
-    <td style="font-size:12px;color:var(--t2);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.detail)}</td>
-  </tr>`).join('') || '<tr><td colspan="4"><div class="empty-state"><span class="empty-icon">🕵️</span><p>Nenhuma atividade registrada</p></div></td></tr>';
-}
-
-function limparHistorico() {
-  showModal(`
-    <div class="modal-title">🗑 Limpar histórico</div>
-    <p class="modal-sub">Apagar todo o histórico de atividades?</p>
-    <div class="modal-footer">
-      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-danger btn-sm" onclick="auditLogs=[];salvarDados();renderHistorico();closeModal();toast('Histórico apagado')">Confirmar</button>
-    </div>
-  `);
-}
-
-function expHistorico() {
-  const csv = 'Data,Usuario,Acao,Detalhe\n' +
-    auditLogs.map(a=>[a.time, a.userName||a.user, a.type, (a.detail||'').replace(/,/g,';')].join(',')).join('\n');
-  const el = document.createElement('a');
-  el.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  el.download = 'historico_rise.csv';
-  el.click();
-}
 </script>
 </body>
 </html>

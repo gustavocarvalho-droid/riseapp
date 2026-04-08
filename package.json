@@ -1,6 +1,7 @@
 {
   "name": "rise-whatsapp",
   "version": "2.0.0",
+  "description": "Rise WhatsApp - Sistema completo de disparos via Evolution API",
   "dependencies": {
     "pg": "^8.11.0"
   },
