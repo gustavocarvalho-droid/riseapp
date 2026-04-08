@@ -1264,8 +1264,9 @@ input[type=range]::-moz-range-thumb{
       </div>
       <div class="card">
         <div class="card-title"><span class="icon">📋</span>Log de Envios</div>
-        <div style="display:flex;gap:8px;margin-bottom:12px">
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
           <button class="btn btn-sm" onclick="expLogs()">⬇ Exportar CSV</button>
+          <button class="btn btn-sm btn-amber" onclick="reenviarFalhas()">🔁 Reenviar falhas</button>
           <button class="btn btn-sm btn-danger" onclick="limparLogs()">🗑 Limpar logs</button>
         </div>
         <div class="table-wrap">
@@ -2041,6 +2042,8 @@ async function doSendMsg(cId, text) {
     if(chatContact?.id===cId) renderChatHistory();
     renderChatList();
     updBadges();
+    // Atualizar relatório se estiver aberto
+    if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
   } catch(e) {
     toast('Erro de conexão: '+e.message,'err');
   }
@@ -2219,7 +2222,7 @@ async function fireNext() {
     document.getElementById('fire-btn').disabled=false;
     document.getElementById('fire-banner').style.display='none';
     toast(`🚀 Disparo concluído! ${fila.length} mensagens processadas`);
-    salvarDados(); renderC(); updBadges(); return;
+    salvarDados(); renderC(); updBadges(); renderLogs(); return;
   }
   const cId=fila[filaIdx];
   const c=contacts.find(x=>x.id===cId);
@@ -2249,6 +2252,7 @@ async function fireNext() {
     logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:text.slice(0,60)});
   }
   salvarDados();
+  if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
   const min=parseInt(document.getElementById('fire-min')?.value||10);
   const max=parseInt(document.getElementById('fire-max')?.value||25);
   const delay=(min+Math.random()*(max-min))*1000;
@@ -2334,18 +2338,35 @@ function renderAgendamentos() {
       :isPast
       ?'<span class="badge badge-amber">Atrasado</span>'
       :'<span class="badge badge-blue">Aguardando</span>';
-    return `<div class="sched-card">
-      <div class="sched-dot" style="background:${ag.status==='done'?'var(--g)':ag.status==='cancelled'?'var(--red)':isPast?'var(--amber)':'var(--blue)'}"></div>
-      <div class="sched-info">
-        <div class="sched-title">${esc(ag.nome)}</div>
-        <div class="sched-meta">${ag.target==='lista'?`Lista: ${listas.find(l=>l.id==ag.listaId)?.nome||'—'}`:'Todos pendentes'}</div>
+    // Descobrir qual mensagem será usada
+    const msgPreview = (() => {
+      if(ag.msg && ag.msg.trim()) return ag.msg.trim().slice(0,80)+(ag.msg.trim().length>80?'...':'');
+      if(savedMsg) return savedMsg.slice(0,80)+(savedMsg.length>80?'...':'');
+      return 'Mensagem principal';
+    })();
+    return `<div class="sched-card" style="flex-direction:column;align-items:stretch;gap:0;padding:0">
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 16px">
+        <div class="sched-dot" style="background:${ag.status==='done'?'var(--g)':ag.status==='cancelled'?'var(--red)':isPast?'var(--amber)':'var(--blue)'}"></div>
+        <div class="sched-info">
+          <div class="sched-title">${esc(ag.nome)}</div>
+          <div class="sched-meta" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:3px">
+            <span>📋 ${ag.target==='lista'?`Lista: ${esc(listas.find(l=>l.id==ag.listaId)?.nome||'—')}`:'Todos pendentes'}</span>
+            <span>⏱ ${ag.minInterval||10}s–${ag.maxInterval||25}s</span>
+            ${ag.maxQty>0?`<span>📨 ${ag.maxQty} msgs</span>`:''}
+          </div>
+        </div>
+        <div class="sched-time" style="text-align:right;flex-shrink:0">
+          <div>${dt.toLocaleDateString('pt-BR')}</div>
+          <div>${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>
+          <div style="margin-top:4px">${statusBadge}</div>
+        </div>
+        ${ag.status==='pending'?`<button class="btn btn-xs btn-danger" style="flex-shrink:0" onclick="cancelAgendamento('${ag.id}')">✕</button>`:''}
       </div>
-      <div class="sched-time">
-        <div>${dt.toLocaleDateString('pt-BR')}</div>
-        <div>${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>
-        <div style="margin-top:4px">${statusBadge}</div>
+      <div style="border-top:1px solid var(--bd2);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--t3);flex-shrink:0">✉️</span>
+        <span style="font-size:12px;color:var(--t2);font-family:var(--mono);line-height:1.5;flex:1;white-space:pre-wrap">${esc(msgPreview)}</span>
+        ${ag.status==='done'?`<button class="btn btn-xs btn-blue" onclick="verHistoricoAg('${ag.id}')">📋 Ver histórico</button>`:''}
       </div>
-      ${ag.status==='pending'?`<button class="btn btn-xs btn-danger" onclick="cancelAgendamento('${ag.id}')">✕</button>`:''}
     </div>`;
   }).join('');
 }
@@ -2391,8 +2412,16 @@ async function fireAgendamento(ag) {
       });
       const ct=contacts.find(x=>x.id===c.id);
       if(ct&&res.ok) ct.status='enviado';
-      logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60),enviadoPor:currentUser?.name||''});
-    } catch(e){ logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:'',enviadoPor:currentUser?.name||''}); }
+      const logEntry={id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60),enviadoPor:currentUser?.name||'',agId:ag.id};
+      logs.unshift(logEntry);
+      if(!ag.historico) ag.historico=[];
+      ag.historico.push(logEntry);
+    } catch(e){
+      const logEntry={id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:'',enviadoPor:currentUser?.name||'',agId:ag.id};
+      logs.unshift(logEntry);
+      if(!ag.historico) ag.historico=[];
+      ag.historico.push(logEntry);
+    }
     const agMin=(ag.minInterval||10)*1000; const agMax=(ag.maxInterval||25)*1000; await new Promise(r=>setTimeout(r,agMin+Math.random()*(agMax-agMin)));
   }
   ag.status='done';
@@ -3170,6 +3199,75 @@ function _doChangePwdSelf() {
   saveUsers(users);
   closeModal();
   toast('Senha alterada com sucesso ✓');
+}
+
+// ── REENVIAR FALHAS ──
+function reenviarFalhas() {
+  const falhas = contacts.filter(c=>c.status==='falha');
+  if(!falhas.length){ toast('Nenhuma falha para reenviar','warn'); return; }
+  showModal(`
+    <div class="modal-title">🔁 Reenviar Falhas</div>
+    <div class="modal-sub">${falhas.length} contato(s) com falha encontrado(s).</div>
+    <p style="font-size:13px;color:var(--t2);margin-bottom:16px">Os status serão resetados para "Pendente" e você poderá disparar novamente.</p>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-amber btn-sm" onclick="_doReenviarFalhas()">🔁 Resetar e reenviar</button>
+    </div>
+  `);
+}
+function _doReenviarFalhas() {
+  const falhas = contacts.filter(c=>c.status==='falha');
+  falhas.forEach(c=>{ c.status='pendente'; });
+  salvarDados(); renderC(); updBadges(); closeModal();
+  toast(`${falhas.length} contato(s) resetado(s) — vá em Disparar Agora`);
+  setTimeout(()=>go('disparo'), 800);
+}
+
+// ── HISTÓRICO DE AGENDAMENTO ──
+function verHistoricoAg(agId) {
+  const ag = agendamentos.find(x=>x.id===agId);
+  if(!ag) return;
+  const hist = ag.historico || logs.filter(l=>l.agId===agId);
+  const env = hist.filter(l=>l.status==='enviado').length;
+  const falha = hist.filter(l=>l.status==='falha').length;
+  showModal(`
+    <div class="modal-title">📋 Histórico — ${esc(ag.nome)}</div>
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <div style="flex:1;background:var(--glow);border:1px solid var(--bd);border-radius:9px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:var(--g);font-family:var(--mono)">${env}</div>
+        <div style="font-size:11px;color:var(--t3)">Enviados</div>
+      </div>
+      <div style="flex:1;background:rgba(255,82,82,.08);border:1px solid rgba(255,82,82,.2);border-radius:9px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:var(--red);font-family:var(--mono)">${falha}</div>
+        <div style="font-size:11px;color:var(--t3)">Falhas</div>
+      </div>
+      <div style="flex:1;background:var(--s2);border:1px solid var(--bd2);border-radius:9px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:var(--t);font-family:var(--mono)">${hist.length}</div>
+        <div style="font-size:11px;color:var(--t3)">Total</div>
+      </div>
+    </div>
+    ${hist.length ? `
+    <div style="max-height:300px;overflow-y:auto;border:1px solid var(--bd2);border-radius:9px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr>
+          <th style="padding:8px 12px;font-size:10px;text-transform:uppercase;color:var(--t3);background:var(--s2);text-align:left;border-bottom:1px solid var(--bd2)">Hora</th>
+          <th style="padding:8px 12px;font-size:10px;text-transform:uppercase;color:var(--t3);background:var(--s2);text-align:left;border-bottom:1px solid var(--bd2)">Contato</th>
+          <th style="padding:8px 12px;font-size:10px;text-transform:uppercase;color:var(--t3);background:var(--s2);text-align:left;border-bottom:1px solid var(--bd2)">Status</th>
+        </tr></thead>
+        <tbody>${hist.map(l=>`<tr style="border-bottom:1px solid rgba(255,255,255,.04)">
+          <td style="padding:8px 12px;font-size:11px;color:var(--t3);font-family:var(--mono)">${esc(l.time.split(',')[1]?.trim()||l.time)}</td>
+          <td style="padding:8px 12px;font-size:12px">
+            <div style="font-weight:600">${esc(l.nome||'—')}</div>
+            <div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${esc(fmt(l.tel))}</div>
+          </td>
+          <td style="padding:8px 12px">${l.status==='enviado'?'<span class="badge badge-green">✓</span>':'<span class="badge badge-red">✗</span>'}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : '<p style="color:var(--t3);font-size:13px;text-align:center;padding:20px">Nenhum registro encontrado.</p>'}
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Fechar</button>
+    </div>
+  `);
 }
 </script>
 </body>
