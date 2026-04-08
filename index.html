@@ -803,6 +803,7 @@ tbody tr:hover td{background:var(--glow2)}
           <button class="btn btn-sm" onclick="deselTodos()">☐ Nenhum</button>
           <button class="btn btn-sm btn-primary" onclick="addSelecionadosModal()">+ Adicionar à lista</button>
           <button class="btn btn-sm" onclick="exportContatos()">⬇ Exportar</button>
+          <button class="btn btn-sm btn-blue" onclick="enviarSelecionadosCRM()">📊 Enviar para CRM</button>
           <span id="sel-count" style="font-size:12px;color:var(--t3);align-self:center;margin-left:4px"></span>
         </div>
         <div class="table-wrap">
@@ -2228,6 +2229,29 @@ function dispararLista(id) {
 }
 
 // ── CRM ──
+function enviarSelecionadosCRM() {
+  const sels = Array.from(document.querySelectorAll('.c-chk:checked')).map(c=>parseInt(c.dataset.id));
+  const list = sels.length ? contacts.filter(c=>sels.includes(c.id)) : contacts;
+  if(!list.length){ toast('Nenhum contato para enviar','warn'); return; }
+  let added = 0;
+  list.forEach(c => {
+    if(!crmData.find(x=>x.contactId===c.id)) {
+      crmData.push({
+        id:uid(), contactId:c.id,
+        nome:c.nome, tel:c.tel, empresa:c.empresa,
+        status:'naoresp', nota:'', updatedAt:Date.now()
+      });
+      added++;
+    }
+  });
+  salvarDados(); updBadges();
+  if(added > 0) {
+    toast(`${added} lead(s) enviado(s) para o CRM ✓`);
+  } else {
+    toast('Todos os contatos já estão no CRM','warn');
+  }
+}
+
 function addCRM(c) {
   if(crmData.find(x=>x.contactId===c.id)) return;
   crmData.push({
