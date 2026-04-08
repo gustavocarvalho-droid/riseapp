@@ -1381,7 +1381,7 @@ async function _saveNeon() {
   try {
     const res = await fetch('/api/dados', {
       method:'POST',
-      headers:{'Content-Type':'application/json','x-user-key':currentUser?.key||'default'},
+      headers:{'Content-Type':'application/json','x-user-key':'shared'},
       body:JSON.stringify({contacts,listas,logs,crm:crmData,fila,agendamentos,savedmsg:savedMsg,config:{tpls}})
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
@@ -1393,7 +1393,7 @@ async function _saveNeon() {
 async function carregarDados() {
   try {
     const res = await fetch('/api/dados', {
-      headers:{'x-user-key':currentUser?.key||'default'}
+      headers:{'x-user-key':'shared'}
     });
     if(!res.ok) return;
     const d = await res.json();
@@ -2284,8 +2284,10 @@ function renderCRM() {
       <div class="crm-col-body">
         ${items.map(c=>`<div class="crm-card" onclick="editCRM('${c.id}')">
           <div class="crm-card-name">${esc(c.nome||'—')}</div>
-          <div class="crm-card-tel">${esc(fmt(c.tel))}</div>
+          <div class="crm-card-tel">${esc(fmt(c.tel))}${c.outroTel?` • ${esc(fmt(c.outroTel))}`:''}</div>
           ${c.empresa?`<div style="font-size:11px;color:var(--t3);margin-bottom:4px">${esc(c.empresa)}</div>`:''}
+          ${c.responsavel?`<div style="font-size:11px;color:var(--blue);margin-bottom:3px">👤 ${esc(c.responsavel)}</div>`:''}
+          ${c.email?`<div style="font-size:11px;color:var(--t3);margin-bottom:3px">✉️ ${esc(c.email)}</div>`:''}
           ${c.nota?`<div class="crm-card-note">${esc(c.nota)}</div>`:''}
         </div>`).join('')||'<div style="font-size:12px;color:var(--t3);padding:8px;text-align:center">—</div>'}
       </div>
@@ -2300,6 +2302,20 @@ function editCRM(crmId) {
     <div class="modal-title">📊 Editar CRM</div>
     <div class="modal-sub">${esc(item.nome||'—')} • ${esc(fmt(item.tel))}</div>
     <div class="field"><label>Status</label><select id="crm-st-sel">${opts}</select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="field" style="margin-bottom:0">
+        <label>Nome do Responsável</label>
+        <input type="text" id="crm-resp-inp" placeholder="Ex: João Silva" value="${esc(item.responsavel||'')}">
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Outro Número</label>
+        <input type="text" id="crm-outro-tel-inp" placeholder="Ex: 5511999999999" value="${esc(item.outroTel||'')}">
+      </div>
+    </div>
+    <div class="field">
+      <label>E-mail de Contato</label>
+      <input type="email" id="crm-email-inp" placeholder="Ex: contato@empresa.com.br" value="${esc(item.email||'')}">
+    </div>
     <div class="field"><label>Anotação</label><textarea id="crm-nota-inp" rows="3">${esc(item.nota||'')}</textarea></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
       ${['Ligação realizada','Enviou proposta','Aguardando retorno','Reagendar'].map(n=>`<button class="btn btn-xs" onclick="document.getElementById('crm-nota-inp').value+=(document.getElementById('crm-nota-inp').value?'\n':'')+${JSON.stringify('['+new Date().toLocaleDateString('pt-BR')+'] '+n)}">${n}</button>`).join('')}
@@ -2316,6 +2332,9 @@ function _saveCRM(id) {
   if(!item) return;
   item.status=document.getElementById('crm-st-sel')?.value;
   item.nota=document.getElementById('crm-nota-inp')?.value;
+  item.responsavel=document.getElementById('crm-resp-inp')?.value||'';
+  item.email=document.getElementById('crm-email-inp')?.value||'';
+  item.outroTel=document.getElementById('crm-outro-tel-inp')?.value||'';
   item.updatedAt=Date.now();
   salvarDados(); renderCRM(); updBadges(); closeModal(); toast('CRM atualizado');
 }
@@ -2325,8 +2344,9 @@ function delCRM(id) {
 }
 function expCRM() {
   const rows=crmData.map(c=>({
-    Nome:c.nome, Telefone:c.tel, Empresa:c.empresa,
-    Status:c.status, Anotacao:c.nota,
+    Nome:c.nome, Telefone:c.tel, OutroTel:c.outroTel||'',
+    Empresa:c.empresa, Responsavel:c.responsavel||'',
+    Email:c.email||'', Status:c.status, Anotacao:c.nota,
     Atualizado:new Date(c.updatedAt).toLocaleString('pt-BR')
   }));
   const wb=XLSX.utils.book_new();
@@ -2480,7 +2500,7 @@ async function testDB() {
   const s=document.getElementById('db-status');
   if(s) s.textContent='Testando...';
   try {
-    const res=await fetch('/api/dados',{headers:{'x-user-key':currentUser?.key||'default'}});
+    const res=await fetch('/api/dados',{headers:{'x-user-key':'shared'}});
     if(res.ok){ if(s) s.innerHTML='<span style="color:var(--g)">✓ DB OK</span>'; toast('Banco OK ✓'); }
     else { if(s) s.innerHTML='<span style="color:var(--red)">✗ HTTP '+res.status+'</span>'; toast('Erro no DB','err'); }
   } catch(e){ if(s) s.innerHTML='<span style="color:var(--red)">✗ '+esc(e.message)+'</span>'; toast('Erro DB','err'); }
@@ -2497,7 +2517,7 @@ function wipeDB() {
 }
 async function _doWipe() {
   try {
-    await fetch('/api/dados',{method:'DELETE',headers:{'x-user-key':currentUser?.key||'default'}});
+    await fetch('/api/dados',{method:'DELETE',headers:{'x-user-key':'shared'}});
     contacts=[];listas=[];logs=[];crmData=[];fila=[];agendamentos=[];savedMsg='';
     closeModal(); renderC(); renderListas(); renderCRM(); renderLogs(); updBadges();
     toast('Dados apagados do banco');
