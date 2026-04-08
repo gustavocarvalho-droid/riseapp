@@ -1987,6 +1987,8 @@ function openChatWindow(id) {
   document.getElementById('chat-send-btn').style.display='';
   document.getElementById('chat-footer').style.display='';
   renderChatHistory();
+  // Buscar histórico real da API
+  fetchChatHistory(c.tel);
   document.querySelectorAll('.contact-item').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.contact-item').forEach(el=>{
     if(el.getAttribute('onclick')?.includes(`openChatWindow(${id})`)) el.classList.add('active');
@@ -3503,27 +3505,110 @@ function receberMensagem(data) {
 // Polling de mensagens (alternativa ao webhook)
 let pollTimer = null;
 let lastPollTs = Date.now();
+let processedMsgIds = new Set();
+
 async function startPolling() {
   if(pollTimer) return;
-  pollTimer = setInterval(async()=>{
-    const base=getApiBase();const key=getApiKey();const inst=getInst();
-    if(!base||!key||!inst) return;
-    try {
-      const res=await fetch(`${base}/chat/findMessages/${inst}`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json','apikey':key},
-        body:JSON.stringify({where:{messageTimestamp:{$gte:Math.floor(lastPollTs/1000)}}})
-      });
-      if(!res.ok) return;
+  // Poll a cada 8 segundos
+  pollTimer = setInterval(pollMessages, 8000);
+}
+
+async function pollMessages() {
+  const base=getApiBase();const key=getApiKey();const inst=getInst();
+  if(!base||!key||!inst) return;
+  try {
+    // Endpoint correto para Evolution API v1.x — busca mensagens recentes
+    const res=await fetch(`${base}/chat/findMessages/${inst}`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':key},
+      body:JSON.stringify({
+        where:{ key:{ fromMe:false } },
+        limit:20
+      })
+    });
+    if(res.ok) {
       const d=await res.json();
-      const msgs=Array.isArray(d)?d:(d?.messages||[]);
+      const msgs=Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
+      // Filtrar apenas mensagens novas
+      const cutoff=lastPollTs/1000;
       msgs.forEach(msg=>{
-        if(msg.key?.fromMe) return;
+        const ts=msg.messageTimestamp||msg.messageTimestamp;
+        if(ts && ts < cutoff) return;
+        const msgId=msg.key?.id;
+        if(msgId && processedMsgIds.has(msgId)) return;
+        if(msgId) processedMsgIds.add(msgId);
+        if(processedMsgIds.size>500) processedMsgIds=new Set([...processedMsgIds].slice(-200));
         receberMensagem({data:msg});
       });
       lastPollTs=Date.now();
-    } catch(e){}
-  }, 15000); // Verifica a cada 15 segundos
+      return;
+    }
+  } catch(e){}
+
+  // Fallback: tentar endpoint alternativo v1.7.x
+  try {
+    const contacts_list = contacts.filter(c=>c.status==='enviado').slice(0,20);
+    for(const c of contacts_list) {
+      const res2=await fetch(`${base}/chat/findMessages/${inst}`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','apikey':key},
+        body:JSON.stringify({
+          where:{ key:{ remoteJid: c.tel+'@s.whatsapp.net', fromMe:false } },
+          limit:5
+        })
+      });
+      if(!res2.ok) continue;
+      const d2=await res2.json();
+      const msgs2=Array.isArray(d2)?d2:(d2?.messages?.records||d2?.messages||[]);
+      msgs2.forEach(msg=>{
+        const msgId=msg.key?.id;
+        if(msgId && processedMsgIds.has(msgId)) return;
+        if(msgId) processedMsgIds.add(msgId);
+        receberMensagem({data:msg});
+      });
+    }
+    lastPollTs=Date.now();
+  } catch(e){}
+}
+
+// Buscar histórico de uma conversa específica
+async function fetchChatHistory(tel) {
+  const base=getApiBase();const key=getApiKey();const inst=getInst();
+  if(!base||!key||!inst) return;
+  try {
+    const res=await fetch(`${base}/chat/findMessages/${inst}`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':key},
+      body:JSON.stringify({
+        where:{key:{remoteJid:tel+'@s.whatsapp.net'}},
+        limit:50
+      })
+    });
+    if(!res.ok) return;
+    const d=await res.json();
+    const msgs=Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
+    if(!msgs.length) return;
+    const contact=contacts.find(c=>c.tel===tel);
+    const cId=contact?.id||tel;
+    // Rebuild chat history from API
+    const apiMsgs=msgs
+      .filter(m=>m.message&&(m.message.conversation||m.message.extendedTextMessage||m.message.imageMessage))
+      .sort((a,b)=>(a.messageTimestamp||0)-(b.messageTimestamp||0))
+      .map(m=>({
+        text:m.message?.conversation||m.message?.extendedTextMessage?.text||m.message?.imageMessage?.caption||'[mídia]',
+        dir:m.key?.fromMe?'out':'in',
+        time:m.messageTimestamp?new Date(m.messageTimestamp*1000).toLocaleString('pt-BR'):'',
+        id:m.key?.id
+      }));
+    if(apiMsgs.length>0){
+      // Merge with existing chatLogs
+      const existing=chatLogs[cId]||[];
+      const existingIds=new Set(existing.map(m=>m.id).filter(Boolean));
+      const newMsgs=apiMsgs.filter(m=>!m.id||!existingIds.has(m.id));
+      chatLogs[cId]=[...apiMsgs]; // Replace with full history from API
+      if(chatContact?.id===cId||chatContact?.tel===tel) renderChatHistory();
+    }
+  } catch(e){ console.warn('fetchChatHistory error:', e); }
 }
 </script>
 </body>
