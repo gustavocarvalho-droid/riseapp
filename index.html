@@ -3468,38 +3468,68 @@ async function setupWebhook() {
 // Processar mensagem recebida via webhook
 function receberMensagem(data) {
   try {
-    const msg = data?.data;
-    if(!msg||msg.key?.fromMe) return; // Ignorar mensagens próprias
-    const tel = (msg.key?.remoteJid||'').replace('@s.whatsapp.net','').replace('@g.us','');
-    if(!tel) return;
+    const msg = data?.data || data;
+    if(!msg) return;
+    if(msg.key?.fromMe) return; // Ignorar mensagens próprias
+
+    const rjid = msg.key?.remoteJid||'';
+    // Ignorar grupos
+    if(rjid.includes('@g.us')) return;
+    const tel = rjid.replace('@s.whatsapp.net','').replace(/\D/g,'');
+    if(!tel||tel.length < 8) return;
+
     const text = msg.message?.conversation
       || msg.message?.extendedTextMessage?.text
       || msg.message?.imageMessage?.caption
+      || (msg.message?.imageMessage?'🖼 Imagem':'')
+      || (msg.message?.audioMessage?'🎵 Áudio':'')
+      || (msg.message?.videoMessage?'🎥 Vídeo':'')
       || '[mídia]';
-    const ts = tsNow();
-    // Adicionar ao chatLogs
-    const contact = contacts.find(c=>c.tel===tel||c.tel===('55'+tel));
+    const ts = msg.messageTimestamp
+      ? new Date(msg.messageTimestamp*1000).toLocaleString('pt-BR')
+      : tsNow();
+    const msgId = msg.key?.id;
+
+    // Deduplicar
+    if(msgId && processedMsgIds.has(msgId)) return;
+    if(msgId) processedMsgIds.add(msgId);
+
+    // Encontrar contato pelo número exato
+    const contact = contacts.find(c=>{
+      const ct=c.tel.replace(/\D/g,'');
+      return ct===tel || ('55'+ct)===tel || ct===('55'+tel);
+    });
     const cId = contact?.id||tel;
+
+    // Adicionar ao chatLogs APENAS deste contato
     if(!chatLogs[cId]) chatLogs[cId]=[];
-    chatLogs[cId].push({text, dir:'in', time:ts});
-    // Notificar
-    if(contact){
-      toast(`💬 ${contact.nome||fmt(tel)}: ${text.slice(0,40)}...`,'info');
+    // Evitar duplicata na lista
+    if(!chatLogs[cId].find(m=>m.id===msgId)) {
+      chatLogs[cId].push({id:msgId, text, dir:'in', time:ts});
     }
-    // Atualizar conversa se estiver aberta
-    if(chatContact?.tel===tel||chatContact?.tel===('55'+tel)){
-      renderChatHistory();
+
+    // Notificar com nome do contato
+    const displayName = contact?.nome || contact?.empresa || fmt(tel);
+    toast(`💬 ${displayName}: ${text.slice(0,50)}`, 'info');
+
+    // Atualizar conversa se for a aberta
+    if(chatContact) {
+      const chatTel = (chatContact.tel||'').replace(/\D/g,'');
+      if(chatTel===tel||('55'+chatTel)===tel||chatTel===('55'+tel)) {
+        renderChatHistory();
+      }
     }
     renderChatList();
-    // Adicionar ao CRM automaticamente se já enviou mensagem
-    if(contact&&contact.status==='enviado'){
-      if(!crmData.find(x=>x.contactId===contact.id)){
+
+    // Adicionar ao CRM se contato enviado
+    if(contact && contact.status==='enviado') {
+      if(!crmData.find(x=>x.contactId===contact.id)) {
         addCRM(contact);
         renderCRM();
         salvarDados();
       }
     }
-  } catch(e){ console.warn('Webhook error:', e); }
+  } catch(e){ console.warn('receberMensagem error:', e); }
 }
 
 // Polling de mensagens (alternativa ao webhook)
@@ -3575,40 +3605,100 @@ async function pollMessages() {
 async function fetchChatHistory(tel) {
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   if(!base||!key||!inst) return;
+
+  // Normalizar telefone — remover código e sufixo WhatsApp
+  const telClean = tel.replace(/\D/g,'');
+  const jid = telClean + '@s.whatsapp.net';
+
+  // Mostrar loading na conversa
+  const body = document.getElementById('chat-body');
+  if(body && body.children.length <= 1) {
+    body.innerHTML = '<div class="empty-state"><span class="empty-icon" style="animation:spin .7s linear infinite">⏳</span><p>Carregando histórico...</p></div>';
+  }
+
+  const contact = contacts.find(c=>c.tel===telClean||c.tel===tel);
+  const cId = contact?.id||telClean;
+
   try {
-    const res=await fetch(`${base}/chat/findMessages/${inst}`,{
+    // Endpoint v1 — filtrar ESTRITAMENTE por remoteJid deste contato
+    const res = await fetch(`${base}/chat/findMessages/${inst}`, {
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
-      body:JSON.stringify({
-        where:{key:{remoteJid:tel+'@s.whatsapp.net'}},
-        limit:50
+      body: JSON.stringify({
+        where: {
+          key: { remoteJid: jid }   // só mensagens DESTE número
+        },
+        limit: 50
       })
     });
-    if(!res.ok) return;
-    const d=await res.json();
-    const msgs=Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
-    if(!msgs.length) return;
-    const contact=contacts.find(c=>c.tel===tel);
-    const cId=contact?.id||tel;
-    // Rebuild chat history from API
-    const apiMsgs=msgs
-      .filter(m=>m.message&&(m.message.conversation||m.message.extendedTextMessage||m.message.imageMessage))
-      .sort((a,b)=>(a.messageTimestamp||0)-(b.messageTimestamp||0))
-      .map(m=>({
-        text:m.message?.conversation||m.message?.extendedTextMessage?.text||m.message?.imageMessage?.caption||'[mídia]',
-        dir:m.key?.fromMe?'out':'in',
-        time:m.messageTimestamp?new Date(m.messageTimestamp*1000).toLocaleString('pt-BR'):'',
-        id:m.key?.id
-      }));
-    if(apiMsgs.length>0){
-      // Merge with existing chatLogs
-      const existing=chatLogs[cId]||[];
-      const existingIds=new Set(existing.map(m=>m.id).filter(Boolean));
-      const newMsgs=apiMsgs.filter(m=>!m.id||!existingIds.has(m.id));
-      chatLogs[cId]=[...apiMsgs]; // Replace with full history from API
-      if(chatContact?.id===cId||chatContact?.tel===tel) renderChatHistory();
+
+    if(!res.ok) {
+      renderChatHistory(); // Mostrar o que tiver em memória
+      return;
     }
-  } catch(e){ console.warn('fetchChatHistory error:', e); }
+
+    const d = await res.json();
+    // Evolution API pode retornar de formas diferentes
+    let msgs = [];
+    if(Array.isArray(d)) msgs = d;
+    else if(d?.messages?.records) msgs = d.messages.records;
+    else if(d?.messages) msgs = d.messages;
+    else if(d?.data) msgs = d.data;
+
+    // Garantir que são APENAS mensagens deste número
+    msgs = msgs.filter(m => {
+      const rjid = m.key?.remoteJid||'';
+      return rjid === jid || rjid.startsWith(telClean);
+    });
+
+    if(!msgs.length) {
+      renderChatHistory();
+      return;
+    }
+
+    // Converter para formato interno
+    const apiMsgs = msgs
+      .filter(m => m.message && (
+        m.message.conversation ||
+        m.message.extendedTextMessage ||
+        m.message.imageMessage ||
+        m.message.videoMessage ||
+        m.message.audioMessage ||
+        m.message.documentMessage
+      ))
+      .sort((a,b) => (a.messageTimestamp||0) - (b.messageTimestamp||0))
+      .map(m => ({
+        id: m.key?.id||uid(),
+        text: m.message?.conversation
+          || m.message?.extendedTextMessage?.text
+          || m.message?.imageMessage?.caption
+          || (m.message?.imageMessage ? '🖼 Imagem' : '')
+          || (m.message?.videoMessage ? '🎥 Vídeo' : '')
+          || (m.message?.audioMessage ? '🎵 Áudio' : '')
+          || (m.message?.documentMessage ? '📄 Documento' : '')
+          || '[mídia]',
+        dir: m.key?.fromMe ? 'out' : 'in',
+        time: m.messageTimestamp
+          ? new Date(m.messageTimestamp * 1000).toLocaleString('pt-BR')
+          : tsNow()
+      }));
+
+    if(apiMsgs.length > 0) {
+      chatLogs[cId] = apiMsgs; // Substituir com histórico real deste contato
+      // Marcar último como notificado
+      apiMsgs.filter(m=>m.dir==='in').forEach(m=>{
+        if(!processedMsgIds.has(m.id)) processedMsgIds.add(m.id);
+      });
+    }
+
+  } catch(e) {
+    console.warn('fetchChatHistory error:', e);
+  }
+
+  // Sempre renderizar ao final
+  if(chatContact?.id===cId || chatContact?.tel===telClean || chatContact?.tel===tel) {
+    renderChatHistory();
+  }
 }
 </script>
 </body>
