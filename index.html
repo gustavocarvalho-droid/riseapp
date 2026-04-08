@@ -923,21 +923,38 @@ tbody tr:hover td{background:var(--glow2)}
 
     <!-- ══════════ DISPARO ══════════ -->
     <div class="panel" id="panel-disparo">
-      <div id="fire-banner" class="show" style="display:none">
-        <div class="fire-title">🚀 <span id="fire-status-title">Disparo em andamento</span></div>
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <div class="progress" style="flex:1;min-width:120px">
+
+      <!-- BANNER DISPARO ATIVO -->
+      <div id="fire-banner" style="display:none;background:linear-gradient(135deg,rgba(0,200,83,.15),rgba(0,230,118,.06));border:1px solid var(--bd);border-radius:var(--r);padding:20px 24px;margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <div style="width:10px;height:10px;border-radius:50%;background:var(--g);box-shadow:0 0 12px var(--g);animation:pulse 1.2s infinite;flex-shrink:0"></div>
+          <span style="font-size:15px;font-weight:700;color:var(--g)" id="fire-status-title">Disparo em andamento</span>
+          <button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="stopFire()">⏹ Parar</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+          <div class="progress" style="flex:1">
             <div class="progress-fill" id="fire-prog" style="width:0%"></div>
           </div>
-          <span id="fire-prog-txt" style="font-size:12px;color:var(--t3);font-family:var(--mono);white-space:nowrap">0 / 0</span>
-          <button class="btn btn-danger btn-sm" onclick="stopFire()">⏹ Parar</button>
+          <span id="fire-prog-txt" style="font-size:13px;color:var(--t);font-family:var(--mono);font-weight:600;white-space:nowrap">0 / 0</span>
         </div>
-        <div id="fire-current" style="font-size:12px;color:var(--t3);margin-top:8px;font-family:var(--mono)"></div>
+        <!-- Timeline dots -->
+        <div style="position:relative;height:28px;margin:8px 0 4px">
+          <div style="position:absolute;top:50%;left:0;right:0;height:2px;background:var(--s3);border-radius:2px;transform:translateY(-50%)"></div>
+          <div id="fire-timeline" style="position:absolute;top:50%;left:0;height:2px;background:linear-gradient(90deg,var(--g2),var(--g));border-radius:2px;transform:translateY(-50%);transition:width .4s;width:0%"></div>
+          <div id="fire-dots" style="position:absolute;top:0;left:0;right:0;height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 4px"></div>
+        </div>
+        <div id="fire-current" style="font-size:12px;color:var(--t3);margin-top:6px;font-family:var(--mono)"></div>
       </div>
 
-      <div class="grid2">
-        <div class="card">
-          <div class="card-title"><span class="icon">🎯</span>Alvo do Disparo</div>
+      <!-- LINHA 1: ALVO + CONFIGURAÇÕES -->
+      <div class="grid2" style="margin-bottom:14px">
+        <!-- ALVO -->
+        <div style="background:var(--s1);border:1px solid var(--bd2);border-radius:var(--r);padding:20px;position:relative;overflow:hidden">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--g2),var(--g),transparent)"></div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+            <span style="width:28px;height:28px;border-radius:7px;background:var(--glow);display:flex;align-items:center;justify-content:center;font-size:14px">🎯</span>
+            Alvo do Disparo
+          </div>
           <div class="field">
             <label>Enviar para</label>
             <select id="fire-target" onchange="updDisparo()">
@@ -948,37 +965,96 @@ tbody tr:hover td{background:var(--glow2)}
           </div>
           <div class="field" id="fire-lista-field" style="display:none">
             <label>Lista</label>
-            <select id="fire-lista-sel">
-              <option value="">Selecionar lista...</option>
-            </select>
+            <select id="fire-lista-sel"><option value="">Selecionar lista...</option></select>
           </div>
-          <div id="fire-preview-count" style="font-size:13px;color:var(--t3);margin-top:4px;font-family:var(--mono)"></div>
+          <div id="fire-preview-count" style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--glow2);border:1px solid var(--bd2);border-radius:8px;font-size:13px;color:var(--t2);font-family:var(--mono);margin-top:4px">
+            <span style="color:var(--g)">📋</span> 0 contato(s) no alvo
+          </div>
         </div>
-        <div class="card">
-          <div class="card-title"><span class="icon">⏱</span>Configurações de Envio</div>
-          <div class="field-row">
-            <div class="field">
-              <label>Intervalo mín. (s)</label>
-              <input type="number" id="fire-min" value="10" min="1">
+
+        <!-- CONFIGURAÇÕES -->
+        <div style="background:var(--s1);border:1px solid var(--bd2);border-radius:var(--r);padding:20px;position:relative;overflow:hidden">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--blue),transparent)"></div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+            <span style="width:28px;height:28px;border-radius:7px;background:rgba(64,196,255,.1);display:flex;align-items:center;justify-content:center;font-size:14px">⏱</span>
+            Configurações de Envio
+          </div>
+
+          <!-- Intervalo visual -->
+          <div style="margin-bottom:14px">
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);display:block;margin-bottom:8px">Intervalo entre mensagens</label>
+            <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center">
+              <div>
+                <div style="font-size:10px;color:var(--t3);margin-bottom:4px;text-align:center">Mínimo (s)</div>
+                <input type="number" id="fire-min" value="10" min="1" oninput="updIntervalChart()" style="text-align:center;font-weight:700;font-size:16px;font-family:var(--mono)">
+              </div>
+              <div style="color:var(--t3);font-size:18px;text-align:center">→</div>
+              <div>
+                <div style="font-size:10px;color:var(--t3);margin-bottom:4px;text-align:center">Máximo (s)</div>
+                <input type="number" id="fire-max" value="25" min="1" oninput="updIntervalChart()" style="text-align:center;font-weight:700;font-size:16px;font-family:var(--mono)">
+              </div>
             </div>
-            <div class="field">
-              <label>Intervalo máx. (s)</label>
-              <input type="number" id="fire-max" value="25" min="1">
+            <!-- Gráfico de tendência do intervalo -->
+            <div style="margin-top:10px;background:var(--s2);border-radius:8px;padding:10px 12px;border:1px solid var(--bd2)">
+              <canvas id="interval-chart" height="40" style="width:100%;display:block"></canvas>
+              <div style="display:flex;justify-content:space-between;margin-top:4px">
+                <span id="ic-min-lbl" style="font-size:10px;color:var(--g);font-family:var(--mono)">~10s</span>
+                <span style="font-size:10px;color:var(--t3)">intervalo aleatório</span>
+                <span id="ic-max-lbl" style="font-size:10px;color:var(--blue);font-family:var(--mono)">~25s</span>
+              </div>
             </div>
           </div>
+
           <div class="field">
-            <label>Mensagem de teste (opcional)</label>
+            <label>Número de teste (opcional)</label>
             <input type="text" id="fire-test-num" placeholder="5511999999999">
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-sm btn-blue" onclick="sendTest()">🧪 Testar</button>
-            <button class="btn btn-primary" id="fire-btn" onclick="startFire()">🚀 Iniciar Disparo</button>
+            <button class="btn btn-sm btn-blue" onclick="sendTest()">🧪 Testar envio</button>
+            <button class="btn btn-primary" id="fire-btn" onclick="startFire()" style="flex:1;justify-content:center">🚀 Iniciar Disparo</button>
           </div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-title"><span class="icon">📋</span>Fila de Envio</div>
+      <!-- LINHA 2: MENSAGEM -->
+      <div style="background:var(--s1);border:1px solid var(--bd2);border-radius:var(--r);padding:20px;margin-bottom:14px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--amber),transparent)"></div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+          <span style="width:28px;height:28px;border-radius:7px;background:rgba(255,171,64,.1);display:flex;align-items:center;justify-content:center;font-size:14px">✉️</span>
+          Mensagem do Disparo
+        </div>
+        <div class="grid2">
+          <div>
+            <div class="field">
+              <label>Selecionar modelo salvo</label>
+              <div style="display:flex;gap:8px">
+                <select id="fire-tpl-sel" style="flex:1" onchange="loadFireTpl()">
+                  <option value="">— Usar mensagem principal —</option>
+                </select>
+                <button class="btn btn-sm" onclick="clearFireMsg()" title="Limpar">✕</button>
+              </div>
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <label>Ou escreva uma mensagem personalizada</label>
+              <textarea id="fire-msg-custom" rows="5" oninput="updFirePrev()" placeholder="Deixe vazio para usar a mensagem principal...&#10;{nome} {empresa} {tel} {cidade}"></textarea>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);display:block;margin-bottom:6px">Pré-visualização</label>
+            <div style="background:var(--s2);border:1px solid var(--bd2);border-radius:9px;padding:14px;min-height:130px;font-size:13px;white-space:pre-wrap;line-height:1.65;color:var(--t);font-family:var(--mono);position:relative">
+              <div style="position:absolute;top:10px;right:10px;background:var(--g);color:#000;font-size:9px;font-weight:700;padding:2px 7px;border-radius:999px">WhatsApp</div>
+              <span id="fire-msg-prev">Usando mensagem principal...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LINHA 3: FILA -->
+      <div style="background:var(--s1);border:1px solid var(--bd2);border-radius:var(--r);padding:20px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+          <span style="width:28px;height:28px;border-radius:7px;background:var(--glow);display:flex;align-items:center;justify-content:center;font-size:14px">📋</span>
+          Fila de Envio
+        </div>
         <div id="fire-queue-wrap">
           <div class="empty-state"><span class="empty-icon">📭</span><p>Nenhum envio na fila</p></div>
         </div>
@@ -987,9 +1063,16 @@ tbody tr:hover td{background:var(--glow2)}
 
     <!-- ══════════ AGENDAMENTO ══════════ -->
     <div class="panel" id="panel-agendamento">
-      <div class="card">
-        <div class="card-title"><span class="icon">🗓️</span>Novo Agendamento</div>
-        <div class="grid2">
+
+      <div style="background:var(--s1);border:1px solid var(--bd2);border-radius:var(--r);padding:20px;margin-bottom:14px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--amber),var(--g),transparent)"></div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:18px;display:flex;align-items:center;gap:8px">
+          <span style="width:28px;height:28px;border-radius:7px;background:rgba(255,171,64,.1);display:flex;align-items:center;justify-content:center;font-size:14px">🗓️</span>
+          Novo Agendamento
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+          <!-- Coluna 1: Info básica -->
           <div>
             <div class="field">
               <label>Nome do agendamento</label>
@@ -1017,18 +1100,62 @@ tbody tr:hover td{background:var(--glow2)}
               <select id="ag-lista-sel"></select>
             </div>
           </div>
+
+          <!-- Coluna 2: Intervalo -->
           <div>
             <div class="field">
-              <label>Mensagem personalizada (opcional)</label>
-              <textarea id="ag-msg" placeholder="Deixe vazio para usar a mensagem principal..."></textarea>
+              <label>Intervalo entre mensagens</label>
+              <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:10px">
+                <div>
+                  <div style="font-size:10px;color:var(--t3);margin-bottom:4px;text-align:center">Mín. (s)</div>
+                  <input type="number" id="ag-min" value="10" min="1" oninput="updAgIntervalChart()" style="text-align:center;font-weight:700;font-size:15px;font-family:var(--mono)">
+                </div>
+                <div style="color:var(--t3);font-size:16px;text-align:center;padding-top:18px">→</div>
+                <div>
+                  <div style="font-size:10px;color:var(--t3);margin-bottom:4px;text-align:center">Máx. (s)</div>
+                  <input type="number" id="ag-max" value="25" min="1" oninput="updAgIntervalChart()" style="text-align:center;font-weight:700;font-size:15px;font-family:var(--mono)">
+                </div>
+              </div>
+              <div style="background:var(--s2);border-radius:8px;padding:10px 12px;border:1px solid var(--bd2)">
+                <canvas id="ag-interval-chart" height="40" style="width:100%;display:block"></canvas>
+                <div style="display:flex;justify-content:space-between;margin-top:4px">
+                  <span id="ag-ic-min-lbl" style="font-size:10px;color:var(--g);font-family:var(--mono)">~10s</span>
+                  <span style="font-size:10px;color:var(--t3)">aleatório</span>
+                  <span id="ag-ic-max-lbl" style="font-size:10px;color:var(--blue);font-family:var(--mono)">~25s</span>
+                </div>
+              </div>
             </div>
           </div>
+
+          <!-- Coluna 3: Mensagem -->
+          <div>
+            <div class="field">
+              <label>Modelo salvo</label>
+              <div style="display:flex;gap:8px">
+                <select id="ag-tpl-sel" style="flex:1" onchange="loadAgTpl()">
+                  <option value="">— Mensagem principal —</option>
+                </select>
+                <button class="btn btn-sm" onclick="clearAgMsg()" title="Limpar">✕</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Ou mensagem personalizada</label>
+              <textarea id="ag-msg" rows="3" oninput="updAgPrev()" placeholder="Deixe vazio para usar a principal...&#10;{nome} {empresa} {tel} {cidade}"></textarea>
+            </div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);display:block;margin-bottom:4px">Preview</label>
+            <div style="background:var(--s2);border:1px solid var(--bd2);border-radius:8px;padding:10px 12px;font-size:12px;font-family:var(--mono);color:var(--t2);min-height:44px;white-space:pre-wrap;line-height:1.5" id="ag-msg-prev">Usando mensagem principal...</div>
+          </div>
         </div>
-        <button class="btn btn-primary" onclick="criarAgendamento()">+ Criar Agendamento</button>
+
+        <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="criarAgendamento()">🗓️ Criar Agendamento</button>
       </div>
 
-      <div class="card">
-        <div class="card-title"><span class="icon">📅</span>Agendamentos Ativos</div>
+      <!-- Agendamentos ativos -->
+      <div style="background:var(--s1);border:1px solid var(--bd2);border-radius:var(--r);padding:20px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+          <span style="width:28px;height:28px;border-radius:7px;background:rgba(255,171,64,.1);display:flex;align-items:center;justify-content:center;font-size:14px">📅</span>
+          Agendamentos Ativos
+        </div>
         <div id="ag-list">
           <div class="empty-state"><span class="empty-icon">🗓️</span><p>Nenhum agendamento criado</p></div>
         </div>
@@ -1282,11 +1409,11 @@ function go(tab) {
   if(tab==='contatos') renderC();
   if(tab==='listas') renderListas();
   if(tab==='mensagem') { loadTpl(); updPrev(); }
-  if(tab==='disparo') updDisparo();
+  if(tab==='disparo') { updDisparo(); populateFireTpls(); updFirePrev(); setTimeout(()=>updIntervalChart(),50); }
   if(tab==='crm') renderCRM();
   if(tab==='relatorio') renderLogs();
   if(tab==='conversa') renderChatList();
-  if(tab==='agendamento') renderAgendamentos();
+  if(tab==='agendamento') { renderAgendamentos(); populateAgTpls(); updAgPrev(); setTimeout(()=>updAgIntervalChart(),50); }
   if(tab==='config') renderConfig();
   if(tab==='numero') checkNum();
 }
@@ -2014,7 +2141,7 @@ function renderFireQueue() {
 }
 
 function startFire() {
-  if(!savedMsg){ toast('Salve uma mensagem primeiro','warn'); return; }
+  if(!getFireMsg()){ toast('Escreva ou selecione uma mensagem primeiro','warn'); return; }
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   if(!base||!key||!inst){ toast('Configure a API primeiro','warn'); return; }
   const list = getFireList();
@@ -2042,6 +2169,7 @@ function updFireUI() {
   const txt = document.getElementById('fire-prog-txt');
   if(prog) prog.style.width=pct+'%';
   if(txt) txt.textContent=`${done} / ${total}`;
+  updFireTimeline();
 }
 async function fireNext() {
   if(!fireActive) return;
@@ -2061,7 +2189,7 @@ async function fireNext() {
   if(cur) cur.textContent=`Enviando para: ${c.nome||fmt(c.tel)} (${fmt(c.tel)})`;
 
   const base=getApiBase();const key=getApiKey();const inst=getInst();
-  const text=buildMsg(savedMsg,c);
+  const text=buildMsg(getFireMsg(),c);
   const ts=tsNow();
   try {
     const res=await fetch(`${base}/message/sendText/${inst}`,{
@@ -2127,6 +2255,8 @@ function criarAgendamento() {
     id:uid(), nome, data, hora,
     ts:dt.getTime(), target:tgt,
     listaId, msg:document.getElementById('ag-msg')?.value||'',
+    minInterval:parseInt(document.getElementById('ag-min')?.value||10),
+    maxInterval:parseInt(document.getElementById('ag-max')?.value||25),
     status:'pending', createdAt:Date.now()
   });
   salvarDados(); renderAgendamentos(); updBadges();
@@ -2220,7 +2350,7 @@ async function fireAgendamento(ag) {
       if(ct&&res.ok) ct.status='enviado';
       logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60)});
     } catch(e){ logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:''}); }
-    await new Promise(r=>setTimeout(r,8000+Math.random()*12000));
+    const agMin=(ag.minInterval||10)*1000; const agMax=(ag.maxInterval||25)*1000; await new Promise(r=>setTimeout(r,agMin+Math.random()*(agMax-agMin)));
   }
   ag.status='done';
   salvarDados(); updBadges(); renderAgendamentos();
@@ -2688,6 +2818,166 @@ document.getElementById('ag-target')?.addEventListener('change', function(){
 // Handle fire target change
 document.getElementById('fire-target')?.addEventListener('change', updDisparo);
 document.getElementById('fire-lista-sel')?.addEventListener('change', updDisparo);
+
+// ── MENSAGEM NO DISPARO ──
+function populateFireTpls() {
+  const sel = document.getElementById('fire-tpl-sel');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Usar mensagem principal —</option>';
+  tpls.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t.id; o.textContent = t.name; sel.appendChild(o);
+  });
+  sel.value = cur;
+}
+function loadFireTpl() {
+  const id = document.getElementById('fire-tpl-sel')?.value;
+  const ta = document.getElementById('fire-msg-custom');
+  if(id && ta) {
+    const t = tpls.find(x=>x.id===id);
+    if(t) ta.value = t.text;
+  }
+  updFirePrev();
+}
+function clearFireMsg() {
+  const ta = document.getElementById('fire-msg-custom');
+  const sel = document.getElementById('fire-tpl-sel');
+  if(ta) ta.value = '';
+  if(sel) sel.value = '';
+  updFirePrev();
+}
+function updFirePrev() {
+  const text = document.getElementById('fire-msg-custom')?.value||'';
+  const prev = document.getElementById('fire-msg-prev');
+  if(prev) prev.textContent = text || (savedMsg ? savedMsg.slice(0,120)+(savedMsg.length>120?'...':'') : 'Usando mensagem principal...');
+}
+function getFireMsg() {
+  return document.getElementById('fire-msg-custom')?.value?.trim() || savedMsg || '';
+}
+
+// ── MENSAGEM NO AGENDAMENTO ──
+function populateAgTpls() {
+  const sel = document.getElementById('ag-tpl-sel');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Usar mensagem principal —</option>';
+  tpls.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t.id; o.textContent = t.name; sel.appendChild(o);
+  });
+  sel.value = cur;
+}
+function loadAgTpl() {
+  const id = document.getElementById('ag-tpl-sel')?.value;
+  const ta = document.getElementById('ag-msg');
+  if(id && ta) {
+    const t = tpls.find(x=>x.id===id);
+    if(t) ta.value = t.text;
+  }
+  updAgPrev();
+}
+function clearAgMsg() {
+  const ta = document.getElementById('ag-msg');
+  const sel = document.getElementById('ag-tpl-sel');
+  if(ta) ta.value = '';
+  if(sel) sel.value = '';
+  updAgPrev();
+}
+function updAgPrev() {
+  const text = document.getElementById('ag-msg')?.value||'';
+  const prev = document.getElementById('ag-msg-prev');
+  if(prev) prev.textContent = text || (savedMsg ? savedMsg.slice(0,120)+(savedMsg.length>120?'...':'') : 'Usando mensagem principal...');
+}
+
+// ── INTERVAL CHARTS ──
+function drawIntervalChart(canvasId, min, max) {
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 200;
+  canvas.width = W;
+  canvas.height = 40;
+  ctx.clearRect(0, 0, W, 40);
+
+  // Draw random trend line simulating intervals
+  const points = [];
+  for(let i=0; i<=20; i++) {
+    const x = (i/20)*W;
+    const val = min + Math.random()*(max-min);
+    const y = 36 - ((val-min)/(Math.max(max-min,1)))*(28);
+    points.push({x, y});
+  }
+
+  // Area fill
+  ctx.beginPath();
+  ctx.moveTo(0, 40);
+  points.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(W, 40);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0,0,0,40);
+  grad.addColorStop(0, 'rgba(0,230,118,.2)');
+  grad.addColorStop(1, 'rgba(0,230,118,.02)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  points.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.strokeStyle = 'rgba(0,230,118,.7)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Min line
+  ctx.beginPath();
+  const minY = 36;
+  ctx.moveTo(0, minY); ctx.lineTo(W, minY);
+  ctx.strokeStyle = 'rgba(0,230,118,.2)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4,4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function updIntervalChart() {
+  const min = parseInt(document.getElementById('fire-min')?.value)||10;
+  const max = parseInt(document.getElementById('fire-max')?.value)||25;
+  const ml = document.getElementById('ic-min-lbl');
+  const xl = document.getElementById('ic-max-lbl');
+  if(ml) ml.textContent = '~'+min+'s';
+  if(xl) xl.textContent = '~'+max+'s';
+  drawIntervalChart('interval-chart', min, max);
+}
+
+function updAgIntervalChart() {
+  const min = parseInt(document.getElementById('ag-min')?.value)||10;
+  const max = parseInt(document.getElementById('ag-max')?.value)||25;
+  const ml = document.getElementById('ag-ic-min-lbl');
+  const xl = document.getElementById('ag-ic-max-lbl');
+  if(ml) ml.textContent = '~'+min+'s';
+  if(xl) xl.textContent = '~'+max+'s';
+  drawIntervalChart('ag-interval-chart', min, max);
+}
+
+// Update fire timeline dots
+function updFireTimeline() {
+  const total = fila.length;
+  const done = filaIdx;
+  const pct = total ? done/total : 0;
+  const tl = document.getElementById('fire-timeline');
+  if(tl) tl.style.width = (pct*100)+'%';
+  const dots = document.getElementById('fire-dots');
+  if(dots && total > 0) {
+    const n = Math.min(total, 12);
+    dots.innerHTML = Array.from({length:n}, (_,i) => {
+      const idx = Math.floor(i/(n-1)*(total-1));
+      const done2 = idx < filaIdx;
+      const active = idx === filaIdx;
+      return `<div style="width:${active?10:7}px;height:${active?10:7}px;border-radius:50%;background:${done2?'var(--g)':active?'var(--amber)':'var(--s4)'};border:1px solid ${done2?'var(--g)':active?'var(--amber)':'var(--t3)'};transition:all .3s;${active?'box-shadow:0 0 8px var(--amber)':''}"></div>`;
+    }).join('');
+  }
+}
 </script>
 </body>
 </html>
