@@ -66,18 +66,19 @@ export default async function handler(req, res) {
         fila: d.fila || [],
         agendamentos: d.agendamentos || [],
         savedmsg: d.savedmsg || '',
-        config: d.config || {}
+        config: d.config || {},
+        auditlogs: d.auditlogs || []
       });
     }
 
     if (req.method === 'POST') {
-      const { contacts, listas, logs, crm, fila, agendamentos, savedmsg, config } = req.body || {};
+      const { contacts, listas, logs, crm, fila, agendamentos, savedmsg, config, auditlogs } = req.body || {};
       await client.query(`
-        INSERT INTO rise_dados (user_key, contacts, listas, logs, crm, fila, agendamentos, savedmsg, config, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+        INSERT INTO rise_dados (user_key, contacts, listas, logs, crm, fila, agendamentos, savedmsg, config, auditlogs, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
         ON CONFLICT (user_key) DO UPDATE SET
           contacts=$2, listas=$3, logs=$4, crm=$5, fila=$6,
-          agendamentos=$7, savedmsg=$8, config=$9, updated_at=NOW()
+          agendamentos=$7, savedmsg=$8, config=$9, auditlogs=$10, updated_at=NOW()
       `, [
         userKey,
         JSON.stringify(contacts || []),
@@ -87,7 +88,8 @@ export default async function handler(req, res) {
         JSON.stringify(fila || []),
         JSON.stringify(agendamentos || []),
         savedmsg || '',
-        JSON.stringify(config || {})
+        JSON.stringify(config || {}),
+        JSON.stringify(auditlogs || [])
       ]);
       return res.status(200).json({ ok: true });
     }
