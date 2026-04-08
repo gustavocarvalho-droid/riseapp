@@ -1,1 +1,12 @@
-﻿{"functions":{"api/dados.js":{"memory":256,"maxDuration":15}},"rewrites":[{"source":"/api/(.*)","destination":"/api/$1"},{"source":"/(.*)","destination":"/index.html"}]}
+{
+  "functions": {
+    "api/dados.js": {
+      "memory": 256,
+      "maxDuration": 15
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
