@@ -1279,6 +1279,7 @@ input[type=range]::-moz-range-thumb{
                 <th>Enviado por</th>
                 <th>Status</th>
                 <th>Mensagem</th>
+                <th>Erro</th>
               </tr>
             </thead>
             <tbody id="log-tbody"></tbody>
@@ -2221,38 +2222,83 @@ async function fireNext() {
     fireActive=false;
     document.getElementById('fire-btn').disabled=false;
     document.getElementById('fire-banner').style.display='none';
-    toast(`🚀 Disparo concluído! ${fila.length} mensagens processadas`);
+    const env=logs.filter(l=>l.status==='enviado'&&fila.includes(l.id)).length;
+    const total=fila.length;
+    toast(`🚀 Disparo concluído! ${total} processados`);
     salvarDados(); renderC(); updBadges(); renderLogs(); return;
   }
   const cId=fila[filaIdx];
   const c=contacts.find(x=>x.id===cId);
   filaIdx++;
   updFireUI();
+  // Pular contato inexistente mas continuar
   if(!c){ fireNext(); return; }
+
   const cur = document.getElementById('fire-current');
-  if(cur) cur.textContent=`Enviando para: ${c.nome||fmt(c.tel)} (${fmt(c.tel)})`;
+  if(cur) cur.textContent=`[${filaIdx}/${fila.length}] ${c.nome||fmt(c.tel)} — ${fmt(c.tel)}`;
 
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   const text=buildMsg(getFireMsg(),c);
   const ts=tsNow();
+
+  let erroMotivo = '';
+  let sucesso = false;
+
   try {
     const res=await fetch(`${base}/message/sendText/${inst}`,{
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
       body:JSON.stringify({number:c.tel,textMessage:{text}})
     });
-    const ct=contacts.find(x=>x.id===cId);
-    if(ct) ct.status=res.ok?'enviado':'falha';
-    logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60),enviadoPor:currentUser?.name||''});
-    if(!chatLogs[cId]) chatLogs[cId]=[];
-    chatLogs[cId].push({text,dir:'out',time:ts});
+
+    // Tentar ler o corpo da resposta para pegar o motivo do erro
+    let respBody = null;
+    try { respBody = await res.json(); } catch(e) {}
+
+    if(res.ok) {
+      sucesso = true;
+    } else {
+      // Capturar motivo do erro da resposta da API
+      erroMotivo = respBody?.message
+        || respBody?.error
+        || respBody?.response?.message
+        || `HTTP ${res.status}`;
+      // Detectar número não WhatsApp
+      if(erroMotivo.toLowerCase().includes('not in whatsapp')
+        || erroMotivo.toLowerCase().includes('not a whatsapp')
+        || erroMotivo.toLowerCase().includes('does not exist')
+        || res.status===400) {
+        erroMotivo = 'Não é WhatsApp';
+      }
+    }
   } catch(e) {
-    const ct=contacts.find(x=>x.id===cId);
-    if(ct) ct.status='falha';
-    logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:text.slice(0,60)});
+    erroMotivo = e.message || 'Erro de conexão';
   }
+
+  // Atualizar status do contato — SEMPRE continua
+  const ct=contacts.find(x=>x.id===cId);
+  if(ct) ct.status=sucesso?'enviado':'falha';
+
+  // Registrar log com motivo do erro
+  const logEntry={
+    id:uid(),time:ts,
+    nome:c.nome,empresa:c.empresa,tel:c.tel,
+    status:sucesso?'enviado':'falha',
+    msg:text.slice(0,60),
+    enviadoPor:currentUser?.name||'',
+    erro:erroMotivo||''
+  };
+  logs.unshift(logEntry);
+
+  if(!chatLogs[cId]) chatLogs[cId]=[];
+  if(sucesso) chatLogs[cId].push({text,dir:'out',time:ts});
+
+  // Atualizar UI em tempo real
   salvarDados();
   if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
+  updBadges();
+
+  // Sempre agendar o próximo — NUNCA para por erro
   const min=parseInt(document.getElementById('fire-min')?.value||10);
   const max=parseInt(document.getElementById('fire-max')?.value||25);
   const delay=(min+Math.random()*(max-min))*1000;
@@ -2653,12 +2699,15 @@ function renderLogs() {
       : '<span style="color:var(--t3);font-size:11px">—</span>'
     }</td>
     <td>${l.status==='enviado'?'<span class="badge badge-green">✓ Enviado</span>':'<span class="badge badge-red">✗ Falha</span>'}</td>
-    <td style="font-size:11px;color:var(--t3);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.msg||'')}</td>
-  </tr>`).join('')||'<tr><td colspan="6"><div class="empty-state"><span class="empty-icon">📋</span><p>Sem logs ainda</p></div></td></tr>';
+    <td style="font-size:11px;color:var(--t3);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.msg||'')}</td>
+    <td style="font-size:11px;max-width:160px">
+      ${l.erro ? `<span style="color:var(--amber);font-family:var(--mono);font-size:10px" title="${esc(l.erro)}">${esc(l.erro.slice(0,40))}${l.erro.length>40?'...':''}</span>` : '<span style="color:var(--t3)">—</span>'}
+    </td>
+  </tr>`).join('')||'<tr><td colspan="7"><div class="empty-state"><span class="empty-icon">📋</span><p>Sem logs ainda</p></div></td></tr>';
 }
 function expLogs() {
-  const csv='Data,Nome,Telefone,Enviado Por,Status,Mensagem\n'+
-    logs.map(l=>[l.time,l.nome,fmt(l.tel),l.enviadoPor||'',l.status,(l.msg||'').replace(/,/g,';')].join(',')).join('\n');
+  const csv='Data,Nome,Telefone,Enviado Por,Status,Mensagem,Erro\n'+
+    logs.map(l=>[l.time,l.nome,fmt(l.tel),l.enviadoPor||'',l.status,(l.msg||'').replace(/,/g,';'),(l.erro||'').replace(/,/g,';')].join(',')).join('\n');
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='logs_rise.csv'; a.click();
