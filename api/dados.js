@@ -27,9 +27,14 @@ async function ensureTable(client) {
       agendamentos JSONB DEFAULT '[]',
       savedmsg TEXT DEFAULT '',
       config JSONB DEFAULT '{}',
+      auditlogs JSONB DEFAULT '[]',
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  // Garante colunas novas em tabelas ja existentes
+  await client.query(`ALTER TABLE rise_dados ADD COLUMN IF NOT EXISTS auditlogs JSONB DEFAULT '[]'`);
+  await client.query(`ALTER TABLE rise_dados ADD COLUMN IF NOT EXISTS agendamentos JSONB DEFAULT '[]'`);
+  await client.query(`ALTER TABLE rise_dados ADD COLUMN IF NOT EXISTS config JSONB DEFAULT '{}'`);
 }
 
 export default async function handler(req, res) {
