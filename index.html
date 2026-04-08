@@ -1275,6 +1275,7 @@ input[type=range]::-moz-range-thumb{
                 <th>Data/Hora</th>
                 <th>Nome</th>
                 <th>Telefone</th>
+                <th>Enviado por</th>
                 <th>Status</th>
                 <th>Mensagem</th>
               </tr>
@@ -2030,10 +2031,10 @@ async function doSendMsg(cId, text) {
     chatLogs[cId].push({text, dir:'out', time:ts});
     if(ok) {
       c.status='enviado';
-      logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'enviado',msg:text.slice(0,60)});
+      logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'enviado',msg:text.slice(0,60),enviadoPor:currentUser?.name||''});
       toast('Mensagem enviada ✓');
     } else {
-      logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:text.slice(0,60)});
+      logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:text.slice(0,60),enviadoPor:currentUser?.name||''});
       toast('Falha ao enviar','err');
     }
     salvarDados();
@@ -2239,7 +2240,7 @@ async function fireNext() {
     });
     const ct=contacts.find(x=>x.id===cId);
     if(ct) ct.status=res.ok?'enviado':'falha';
-    logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60)});
+    logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60),enviadoPor:currentUser?.name||''});
     if(!chatLogs[cId]) chatLogs[cId]=[];
     chatLogs[cId].push({text,dir:'out',time:ts});
   } catch(e) {
@@ -2390,8 +2391,8 @@ async function fireAgendamento(ag) {
       });
       const ct=contacts.find(x=>x.id===c.id);
       if(ct&&res.ok) ct.status='enviado';
-      logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60)});
-    } catch(e){ logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:''}); }
+      logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60),enviadoPor:currentUser?.name||''});
+    } catch(e){ logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:'',enviadoPor:currentUser?.name||''}); }
     const agMin=(ag.minInterval||10)*1000; const agMax=(ag.maxInterval||25)*1000; await new Promise(r=>setTimeout(r,agMin+Math.random()*(agMax-agMin)));
   }
   ag.status='done';
@@ -2614,13 +2615,17 @@ function renderLogs() {
     <td style="font-family:var(--mono);font-size:11px;white-space:nowrap">${esc(l.time)}</td>
     <td>${esc(l.nome||'—')}</td>
     <td style="font-family:var(--mono);font-size:12px">${esc(fmt(l.tel))}</td>
+    <td>${l.enviadoPor
+      ? `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--blue)"><span style="width:20px;height:20px;border-radius:5px;background:rgba(64,196,255,.12);display:inline-flex;align-items:center;justify-content:center;font-size:9px">${esc(l.enviadoPor.split(' ')[0].slice(0,2).toUpperCase())}</span>${esc(l.enviadoPor.split(' ')[0])}</span>`
+      : '<span style="color:var(--t3);font-size:11px">—</span>'
+    }</td>
     <td>${l.status==='enviado'?'<span class="badge badge-green">✓ Enviado</span>':'<span class="badge badge-red">✗ Falha</span>'}</td>
     <td style="font-size:11px;color:var(--t3);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.msg||'')}</td>
-  </tr>`).join('')||'<tr><td colspan="5"><div class="empty-state"><span class="empty-icon">📋</span><p>Sem logs ainda</p></div></td></tr>';
+  </tr>`).join('')||'<tr><td colspan="6"><div class="empty-state"><span class="empty-icon">📋</span><p>Sem logs ainda</p></div></td></tr>';
 }
 function expLogs() {
-  const csv='Data,Nome,Telefone,Status,Mensagem\n'+
-    logs.map(l=>[l.time,l.nome,fmt(l.tel),l.status,(l.msg||'').replace(/,/g,';')].join(',')).join('\n');
+  const csv='Data,Nome,Telefone,Enviado Por,Status,Mensagem\n'+
+    logs.map(l=>[l.time,l.nome,fmt(l.tel),l.enviadoPor||'',l.status,(l.msg||'').replace(/,/g,';')].join(',')).join('\n');
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='logs_rise.csv'; a.click();
