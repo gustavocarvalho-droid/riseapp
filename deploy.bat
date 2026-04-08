@@ -55,11 +55,9 @@ if %errorlevel% equ 0 (
     echo.
     echo  ================================================
     echo   [SUCESSO] Deploy enviado!
-    echo   Aguardando Vercel processar (30 segundos)...
+    echo   Vercel atualiza em ~1 minuto.
+    echo   Acesse: https://riseapp-henna.vercel.app
     echo  ================================================
-    timeout /t 30 /nobreak
-    echo  Abrindo o sistema...
-    start https://riseapp-henna.vercel.app
 ) else (
     echo.
     echo  [ERRO] Falha no push. Verifique autenticacao GitHub.

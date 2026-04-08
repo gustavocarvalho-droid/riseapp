@@ -1823,24 +1823,27 @@ function saveMsg() {
   savedMsg = document.getElementById('msg-text')?.value||'';
   salvarDados(); toast('Mensagem salva ✓');
 }
+let _pendingTplText = '';
 function saveTpl() {
   const text = document.getElementById('msg-text')?.value?.trim();
   if(!text){ toast('Escreva uma mensagem primeiro','warn'); return; }
+  _pendingTplText = text;
   showModal(`
     <div class="modal-title">💾 Salvar Modelo</div>
     <div class="field"><label>Nome do modelo</label>
-      <input type="text" id="tpl-name-inp" placeholder="Ex: Promoção Black Friday">
+      <input type="text" id="tpl-name-inp" placeholder="Ex: Promoção Black Friday" onkeydown="if(event.key==='Enter')_doSaveTpl()">
     </div>
     <div class="modal-footer">
       <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary btn-sm" onclick="_doSaveTpl(${JSON.stringify(text).replace(/'/g,'&#39;')})">Salvar</button>
+      <button class="btn btn-primary btn-sm" onclick="_doSaveTpl()">Salvar</button>
     </div>
   `);
+  setTimeout(()=>document.getElementById('tpl-name-inp')?.focus(), 100);
 }
-function _doSaveTpl(text) {
+function _doSaveTpl() {
   const name = document.getElementById('tpl-name-inp')?.value?.trim();
   if(!name){ toast('Nome obrigatório','warn'); return; }
-  tpls.push({id:uid(), name, text});
+  tpls.push({id:uid(), name, text:_pendingTplText});
   salvarDados(); loadTpl(); closeModal(); toast(`Modelo "${name}" salvo`);
 }
 function loadTpl() {
