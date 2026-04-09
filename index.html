@@ -1621,7 +1621,7 @@ async function _saveNeon() {
     const res = await fetch('/api/dados', {
       method:'POST',
       headers:{'Content-Type':'application/json','x-user-key':'shared'},
-      body:JSON.stringify({contacts,listas,logs,crm:crmData,fila,agendamentos,savedmsg:savedMsg,config:{tpls}})
+      body:JSON.stringify({contacts,listas,logs,crm:crmData,fila,agendamentos,savedmsg:savedMsg,config:{tpls},chatLogs,crmCustomCols})
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
     if(ind){ind.style.opacity='1';setTimeout(()=>ind.style.opacity='0',2000);}
@@ -1644,6 +1644,8 @@ async function carregarDados() {
     agendamentos = d.agendamentos||[];
     savedMsg = d.savedmsg||'';
     if(d.config?.tpls) tpls = d.config.tpls;
+    if(d.chatLogs) chatLogs = d.chatLogs;
+    if(d.crmCustomCols) crmCustomCols = d.crmCustomCols;
     renderC(); renderListas(); updBadges(); renderAgendamentos();
     loadAllChats();
   } catch(e) {
@@ -2158,7 +2160,7 @@ async function doSendMsg(cId, text) {
     const ok = res.ok;
     const ts = tsNow();
     if(!chatLogs[cId]) chatLogs[cId]=[];
-    chatLogs[cId].push({text, dir:'out', time:ts});
+    chatLogs[cId].push({text, dir:'out', time:ts, ts:Math.floor(Date.now()/1000)});
     if(ok) {
       c.status='enviado';
       logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'enviado',msg:text.slice(0,60),enviadoPor:currentUser?.name||''});
@@ -2419,7 +2421,7 @@ async function fireNext() {
   logs.unshift(logEntry);
 
   if(!chatLogs[cId]) chatLogs[cId]=[];
-  if(sucesso) chatLogs[cId].push({text,dir:'out',time:ts});
+  if(sucesso) chatLogs[cId].push({text,dir:'out',time:ts,ts:Math.floor(Date.now()/1000)});
 
   // Atualizar UI em tempo real
   salvarDados();
