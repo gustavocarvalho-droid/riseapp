@@ -1427,6 +1427,7 @@ let fireTimer = null;
 let filaIdx = 0;
 let chatContact = null;
 let chatLogs = {};
+let inboxContacts = []; // Contatos que iniciaram conversa mas não estão na lista
 let ctPage = 0;
 const CT_PER_PAGE = 50;
 let agTimer = null;
@@ -1622,6 +1623,7 @@ async function carregarDados() {
     savedMsg = d.savedmsg||'';
     if(d.config?.tpls) tpls = d.config.tpls;
     renderC(); renderListas(); updBadges(); renderAgendamentos();
+    loadAllChats();
   } catch(e) {
     console.warn('Load error:', e);
   }
@@ -1981,27 +1983,80 @@ function renderChatList() {
   const srch = (document.getElementById('chat-search')?.value||'').toLowerCase();
   const list = document.getElementById('chat-list');
   if(!list) return;
-  const filtered = contacts.filter(c=>!srch||`${c.nome||''} ${c.tel||''}`.toLowerCase().includes(srch));
-  if(!filtered.length){
-    list.innerHTML='<div class="empty-state"><span class="empty-icon">👥</span><p>Sem contatos</p></div>';
+
+  // Contatos com histórico (enviaram ou receberam)
+  const withHistory = contacts.filter(c => {
+    const hasLog = chatLogs[c.id] && chatLogs[c.id].length > 0;
+    const matchSearch = !srch||`${c.nome||''} ${c.tel||''}`.toLowerCase().includes(srch);
+    return hasLog && matchSearch;
+  });
+
+  // Contatos sem histórico mas que combinam com a busca
+  const withoutHistory = contacts.filter(c => {
+    const hasLog = chatLogs[c.id] && chatLogs[c.id].length > 0;
+    const matchSearch = !srch||`${c.nome||''} ${c.tel||''}`.toLowerCase().includes(srch);
+    return !hasLog && matchSearch;
+  });
+
+  // Inbox: quem chamou mas não está nos contatos
+  const filteredInbox = inboxContacts.filter(c =>
+    !srch||`${c.nome||''} ${c.tel||''}`.toLowerCase().includes(srch)
+  );
+
+  // Ordenar por última mensagem
+  const sortByLast = arr => arr.sort((a,b) => {
+    const aLogs = chatLogs[a.id]||[];
+    const bLogs = chatLogs[b.id]||[];
+    const aTs = aLogs[aLogs.length-1]?.ts||0;
+    const bTs = bLogs[bLogs.length-1]?.ts||0;
+    return bTs - aTs;
+  });
+
+  const allWithHistory = sortByLast([...withHistory, ...filteredInbox]);
+  const allItems = [...allWithHistory, ...withoutHistory];
+
+  if(!allItems.length && !filteredInbox.length) {
+    list.innerHTML='<div class="empty-state"><span class="empty-icon">💬</span><p>Nenhuma conversa ainda</p></div>';
     return;
   }
-  list.innerHTML = filtered.map(c=>{
+
+  function makeItem(c, isInbox) {
     const msgs = chatLogs[c.id]||[];
     const last = msgs[msgs.length-1];
-    return `<div class="contact-item${chatContact?.id===c.id?' active':''}" onclick="openChatWindow(${c.id})">
-      <div class="ci-av">${initials(c.nome||c.tel)}</div>
-      <div class="ci-info">
-        <div class="ci-name">${esc(c.nome||fmt(c.tel))}</div>
-        <div class="ci-last">${last?esc(last.text.slice(0,40)):esc(fmt(c.tel))}</div>
+    const hasUnread = msgs.some(m=>m.dir==='in'&&!m.read);
+    const isActive = chatContact?.id===c.id||chatContact?.tel===c.tel;
+    return `<div class="contact-item${isActive?' active':''}" onclick="openChatWindow_tel('${c.tel||c.id}')">
+      <div class="ci-av" style="${isInbox?'background:rgba(255,171,64,.15);color:var(--amber)':''}">
+        ${initials(c.nome||c.tel)}
       </div>
-      ${last?`<div class="ci-time">${last.time.split(' ')[1]||''}</div>`:''}
+      <div class="ci-info">
+        <div class="ci-name" style="display:flex;align-items:center;gap:6px">
+          ${esc(c.nome||fmt(c.tel))}
+          ${isInbox?'<span style="font-size:9px;background:rgba(255,171,64,.2);color:var(--amber);padding:1px 5px;border-radius:999px">novo</span>':''}
+          ${hasUnread?'<span style="width:8px;height:8px;border-radius:50%;background:var(--g);flex-shrink:0"></span>':''}
+        </div>
+        <div class="ci-last" style="${last?.dir==='in'?'color:var(--t2)':''}">${last?esc(last.text.slice(0,40)):(c.empresa?esc(c.empresa):esc(fmt(c.tel)))}</div>
+      </div>
+      ${last?`<div class="ci-time" style="font-size:10px;color:${last.dir==='in'?'var(--g)':'var(--t3)'}">${last.time.split(',')[1]?.trim().slice(0,5)||''}</div>`:''}
     </div>`;
-  }).join('');
+  }
+
+  list.innerHTML = allItems.map(c => makeItem(c, inboxContacts.includes(c))).join('');
 }
-function openChatWindow(id) {
-  const c = contacts.find(x=>x.id===id);
+
+// Abrir conversa por telefone (para inbox contacts)
+function openChatWindow_tel(telOrId) {
+  // Tentar achar por id primeiro
+  let c = contacts.find(x=>String(x.id)===String(telOrId));
+  // Tentar por tel
+  if(!c) c = contacts.find(x=>x.tel===telOrId);
+  // Tentar inbox
+  if(!c) c = inboxContacts.find(x=>x.tel===telOrId||String(x.id)===String(telOrId));
   if(!c) return;
+  openChatWindowObj(c);
+}
+
+function openChatWindowObj(c) {
   chatContact = c;
   document.getElementById('chat-av').textContent = initials(c.nome||c.tel);
   document.getElementById('chat-name').textContent = c.nome||fmt(c.tel);
@@ -2009,12 +2064,13 @@ function openChatWindow(id) {
   document.getElementById('chat-send-btn').style.display='';
   document.getElementById('chat-footer').style.display='';
   renderChatHistory();
-  // Buscar histórico real da API
   fetchChatHistory(c.tel);
-  document.querySelectorAll('.contact-item').forEach(el=>el.classList.remove('active'));
-  document.querySelectorAll('.contact-item').forEach(el=>{
-    if(el.getAttribute('onclick')?.includes(`openChatWindow(${id})`)) el.classList.add('active');
-  });
+  renderChatList();
+}
+function openChatWindow(id) {
+  const c = contacts.find(x=>x.id===id);
+  if(!c) return;
+  openChatWindowObj(c);
 }
 function renderChatHistory() {
   const body = document.getElementById('chat-body');
@@ -3664,6 +3720,20 @@ function receberMensagem(data) {
     }
     renderChatList();
 
+    // Se não está nos contatos, adicionar ao inbox
+    if(!contact) {
+      const existInbox = inboxContacts.find(x=>x.tel===tel||x.tel===('55'+tel));
+      if(!existInbox) {
+        const newInbox = {
+          id: 'inbox_'+tel,
+          tel, nome: tel, empresa: '',
+          status: 'inbox', addedAt: Date.now()
+        };
+        inboxContacts.push(newInbox);
+        toast(`📨 Nova conversa de ${fmt(tel)}`,'info');
+      }
+    }
+
     // Adicionar ao CRM se contato enviado
     if(contact && contact.status==='enviado') {
       if(!crmData.find(x=>x.contactId===contact.id)) {
@@ -3671,6 +3741,11 @@ function receberMensagem(data) {
         renderCRM();
         salvarDados();
       }
+    }
+
+    // Atualizar lista de conversas
+    if(document.getElementById('panel-conversa')?.classList.contains('show')) {
+      renderChatList();
     }
   } catch(e){ console.warn('receberMensagem error:', e); }
 }
@@ -3897,6 +3972,57 @@ async function fetchChatHistory(tel) {
   if(chatContact?.id===cId||chatContact?.tel===telClean||chatContact?.tel===tel) {
     renderChatHistory();
   }
+}
+
+// ── CARREGAR TODOS OS CHATS DA API ──
+async function loadAllChats() {
+  const base=getApiBase();const key=getApiKey();const inst=getInst();
+  if(!base||!key||!inst) return;
+  try {
+    // Buscar lista de chats ativos
+    const res = await fetch(`${base}/chat/findChats/${inst}`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':key},
+      body: JSON.stringify({})
+    });
+    if(!res.ok) return;
+    const d = await res.json();
+    const chats = Array.isArray(d)?d:(d?.chats||d?.data||[]);
+
+    chats.forEach(chat => {
+      const rjid = chat.id||chat.remoteJid||'';
+      if(rjid.includes('@g.us')) return; // ignorar grupos
+      const tel = rjid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'');
+      if(!tel||tel.length<8) return;
+
+      // Verificar se já existe nos contatos
+      const exists = contacts.find(c=>{
+        const ct=(c.tel||'').replace(/[^0-9]/g,'');
+        const clean=tel.replace(/^55/,'');
+        const ctclean=ct.replace(/^55/,'');
+        return ct===tel||ctclean===clean||ct.endsWith(clean);
+      });
+
+      // Se não existe nos contatos, adicionar ao inbox
+      if(!exists) {
+        const existInbox = inboxContacts.find(x=>{
+          const xt=(x.tel||'').replace(/[^0-9]/g,'');
+          return xt===tel||xt.endsWith(tel.replace(/^55/,''));
+        });
+        if(!existInbox) {
+          const name = chat.name||chat.pushName||fmt(tel);
+          inboxContacts.push({
+            id:'inbox_'+tel, tel, nome:name,
+            empresa:'', status:'inbox', addedAt:Date.now()
+          });
+        }
+      }
+    });
+
+    if(inboxContacts.length > 0) {
+      renderChatList();
+    }
+  } catch(e) { console.warn('loadAllChats error:', e); }
 }
 </script>
 </body>
