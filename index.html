@@ -1504,7 +1504,7 @@ function go(tab) {
   if(tab==='disparo') { updDisparo(); populateFireTpls(); updFirePrev(); setTimeout(()=>syncFireSliders(),50); }
   if(tab==='crm') renderCRM();
   if(tab==='relatorio') renderLogs();
-  if(tab==='conversa') renderChatList();
+  if(tab==='conversa') { renderChatList(); preloadRecentChats(); }
   if(tab==='agendamento') { renderAgendamentos(); populateAgTpls(); updAgPrev(); setTimeout(()=>syncAgSliders(),50); }
   if(tab==='config') renderConfig();
   if(tab==='numero') checkNum();
@@ -3917,9 +3917,8 @@ async function fetchChatHistory(tel) {
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
       body: JSON.stringify({
-        where: { key: { remoteJid: { $in: [jid, jid.replace('@s.whatsapp.net','@lid'), telClean+'@lid'] } } },
-        limit: 200,
-        sort: { messageTimestamp: -1 }
+        where: { key: { remoteJid: jid } },
+        limit: 200
       })
     });
     if(r.ok) {
@@ -4059,6 +4058,48 @@ async function loadAllChats() {
       renderChatList();
     }
   } catch(e) { console.warn('loadAllChats error:', e); }
+}
+
+// Pré-carregar conversas recentes ao abrir aba
+let preloadDone = false;
+async function preloadRecentChats() {
+  if(preloadDone) return;
+  preloadDone = true;
+  const base=getApiBase();const key=getApiKey();const inst=getInst();
+  if(!base||!key||!inst) return;
+  // Buscar os últimos 20 contatos com status enviado
+  const recent = contacts.filter(c=>c.status==='enviado').slice(0,20);
+  for(const c of recent) {
+    if(chatLogs[c.id]?.length) continue; // já tem histórico
+    const tel = (c.tel||'').replace(/[^0-9]/g,'');
+    const jid = tel+'@s.whatsapp.net';
+    try {
+      const r = await fetch(`${base}/chat/findMessages/${inst}`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','apikey':key},
+        body:JSON.stringify({where:{key:{remoteJid:jid}},limit:5})
+      });
+      if(!r.ok) continue;
+      const d = await r.json();
+      let msgs = Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
+      msgs = msgs.filter(m=>{
+        const rjid=(m.key?.remoteJid||'').replace(/[^0-9]/g,'');
+        const clean=tel.replace(/^55/,'');
+        return rjid===tel||rjid.replace(/^55/,'')=== clean;
+      });
+      if(msgs.length) {
+        const converted = msgs.map(m=>({
+          id:m.key?.id||uid(),
+          text:m.message?.conversation||m.message?.extendedTextMessage?.text||'[mídia]',
+          dir:m.key?.fromMe?'out':'in',
+          time:m.messageTimestamp?new Date(m.messageTimestamp*1000).toLocaleString('pt-BR'):tsNow(),
+          ts:m.messageTimestamp||0
+        })).filter(m=>m.text&&m.text!=='[mídia]'||true).sort((a,b)=>a.ts-b.ts);
+        if(converted.length) { chatLogs[c.id]=converted; chatLogs[tel]=converted; }
+      }
+    } catch(e){}
+  }
+  renderChatList();
 }
 </script>
 </body>
