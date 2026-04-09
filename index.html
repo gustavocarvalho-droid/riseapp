@@ -3749,97 +3749,122 @@ async function fetchChatHistory(tel) {
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   if(!base||!key||!inst) return;
 
-  // Normalizar telefone — remover código e sufixo WhatsApp
-  const telClean = tel.replace(/\D/g,'');
+  const telClean = tel.replace(/[^0-9]/g,'');
   const jid = telClean + '@s.whatsapp.net';
-
-  // Mostrar loading na conversa
-  const body = document.getElementById('chat-body');
-  if(body && body.children.length <= 1) {
-    body.innerHTML = '<div class="empty-state"><span class="empty-icon" style="animation:spin .7s linear infinite">⏳</span><p>Carregando histórico...</p></div>';
-  }
-
   const contact = contacts.find(c=>c.tel===telClean||c.tel===tel);
   const cId = contact?.id||telClean;
 
-  try {
-    // Endpoint v1 — filtrar ESTRITAMENTE por remoteJid deste contato
-    const res = await fetch(`${base}/chat/findMessages/${inst}`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key},
-      body: JSON.stringify({
-        where: {
-          key: { remoteJid: jid }   // só mensagens DESTE número
-        },
-        limit: 50
-      })
-    });
+  // Loading
+  const body = document.getElementById('chat-body');
+  if(body && (!chatLogs[cId]||!chatLogs[cId].length)) {
+    body.innerHTML = '<div class="empty-state"><span class="empty-icon">⏳</span><p>Carregando mensagens...</p></div>';
+  }
 
-    if(!res.ok) {
-      renderChatHistory(); // Mostrar o que tiver em memória
-      return;
-    }
-
-    const d = await res.json();
-    // Evolution API pode retornar de formas diferentes
+  function extractMsgs(d) {
     let msgs = [];
     if(Array.isArray(d)) msgs = d;
     else if(d?.messages?.records) msgs = d.messages.records;
-    else if(d?.messages) msgs = d.messages;
-    else if(d?.data) msgs = d.data;
-
-    // Garantir que são APENAS mensagens deste número
-    msgs = msgs.filter(m => {
+    else if(Array.isArray(d?.messages)) msgs = d.messages;
+    else if(d?.data) msgs = Array.isArray(d.data)?d.data:[];
+    return msgs.filter(m => {
       const rjid = m.key?.remoteJid||'';
-      return rjid === jid || rjid.startsWith(telClean);
+      return rjid===jid || rjid.startsWith(telClean);
     });
+  }
 
-    if(!msgs.length) {
-      renderChatHistory();
-      return;
+  function convertMsg(m) {
+    const text = m.message?.conversation
+      || m.message?.extendedTextMessage?.text
+      || m.message?.imageMessage?.caption
+      || (m.message?.imageMessage?'🖼 Imagem':'')
+      || (m.message?.videoMessage?'🎥 Vídeo':'')
+      || (m.message?.audioMessage?'🎵 Áudio':'')
+      || (m.message?.documentMessage?'📄 Documento':'')
+      || (m.message?'[mídia]':'');
+    if(!text) return null;
+    return {
+      id: m.key?.id||uid(),
+      text,
+      dir: m.key?.fromMe?'out':'in',
+      time: m.messageTimestamp
+        ? new Date(m.messageTimestamp*1000).toLocaleString('pt-BR')
+        : tsNow(),
+      ts: m.messageTimestamp||0
+    };
+  }
+
+  let apiMsgs = [];
+
+  // Tentar endpoint 1: GET /chat/findMessages/{inst}/{jid}
+  try {
+    const r1 = await fetch(`${base}/chat/findMessages/${inst}/${encodeURIComponent(jid)}`, {
+      headers:{'apikey':key}
+    });
+    if(r1.ok) {
+      const d = await r1.json();
+      const msgs = extractMsgs(d);
+      if(msgs.length) { apiMsgs = msgs; }
     }
+  } catch(e) {}
 
-    // Converter para formato interno
-    const apiMsgs = msgs
-      .filter(m => m.message && (
-        m.message.conversation ||
-        m.message.extendedTextMessage ||
-        m.message.imageMessage ||
-        m.message.videoMessage ||
-        m.message.audioMessage ||
-        m.message.documentMessage
-      ))
-      .sort((a,b) => (a.messageTimestamp||0) - (b.messageTimestamp||0))
-      .map(m => ({
-        id: m.key?.id||uid(),
-        text: m.message?.conversation
-          || m.message?.extendedTextMessage?.text
-          || m.message?.imageMessage?.caption
-          || (m.message?.imageMessage ? '🖼 Imagem' : '')
-          || (m.message?.videoMessage ? '🎥 Vídeo' : '')
-          || (m.message?.audioMessage ? '🎵 Áudio' : '')
-          || (m.message?.documentMessage ? '📄 Documento' : '')
-          || '[mídia]',
-        dir: m.key?.fromMe ? 'out' : 'in',
-        time: m.messageTimestamp
-          ? new Date(m.messageTimestamp * 1000).toLocaleString('pt-BR')
-          : tsNow()
-      }));
+  // Tentar endpoint 2: POST /chat/findMessages/{inst}
+  if(!apiMsgs.length) {
+    try {
+      const r2 = await fetch(`${base}/chat/findMessages/${inst}`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','apikey':key},
+        body: JSON.stringify({ where:{ key:{ remoteJid:jid } }, limit:50 })
+      });
+      if(r2.ok) {
+        const d = await r2.json();
+        apiMsgs = extractMsgs(d);
+      }
+    } catch(e) {}
+  }
 
-    if(apiMsgs.length > 0) {
-      chatLogs[cId] = apiMsgs; // Substituir com histórico real deste contato
-      // Marcar último como notificado
-      apiMsgs.filter(m=>m.dir==='in').forEach(m=>{
+  // Tentar endpoint 3: GET /message/findMessages/{inst}?remoteJid=...
+  if(!apiMsgs.length) {
+    try {
+      const r3 = await fetch(`${base}/message/findMessages/${inst}?remoteJid=${encodeURIComponent(jid)}&limit=50`, {
+        headers:{'apikey':key}
+      });
+      if(r3.ok) {
+        const d = await r3.json();
+        apiMsgs = extractMsgs(d);
+      }
+    } catch(e) {}
+  }
+
+  // Tentar endpoint 4: POST /chat/findMessages/{inst} sem filtro e filtrar localmente
+  if(!apiMsgs.length) {
+    try {
+      const r4 = await fetch(`${base}/chat/findMessages/${inst}`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','apikey':key},
+        body: JSON.stringify({ limit:100 })
+      });
+      if(r4.ok) {
+        const d = await r4.json();
+        apiMsgs = extractMsgs(d);
+      }
+    } catch(e) {}
+  }
+
+  if(apiMsgs.length) {
+    const converted = apiMsgs
+      .map(convertMsg)
+      .filter(Boolean)
+      .sort((a,b)=>a.ts-b.ts);
+
+    if(converted.length) {
+      chatLogs[cId] = converted;
+      converted.filter(m=>m.dir==='in').forEach(m=>{
         if(!processedMsgIds.has(m.id)) processedMsgIds.add(m.id);
       });
     }
-
-  } catch(e) {
-    console.warn('fetchChatHistory error:', e);
   }
 
-  // Sempre renderizar ao final
-  if(chatContact?.id===cId || chatContact?.tel===telClean || chatContact?.tel===tel) {
+  if(chatContact?.id===cId||chatContact?.tel===telClean||chatContact?.tel===tel) {
     renderChatHistory();
   }
 }
