@@ -3766,20 +3766,27 @@ async function fetchChatHistory(tel) {
     else if(d?.messages?.records) msgs = d.messages.records;
     else if(Array.isArray(d?.messages)) msgs = d.messages;
     else if(d?.data) msgs = Array.isArray(d.data)?d.data:[];
+    // Aceitar variações do número: com/sem 55, @s.whatsapp.net, @c.us
     return msgs.filter(m => {
-      const rjid = m.key?.remoteJid||'';
-      return rjid===jid || rjid.startsWith(telClean);
+      const rjid = (m.key?.remoteJid||'').replace('@s.whatsapp.net','').replace('@c.us','').replace(/\D/g,'');
+      const clean = telClean.replace(/^55/,'');
+      const rclean = rjid.replace(/^55/,'');
+      return rjid===telClean || rclean===clean || rjid.endsWith(clean);
     });
   }
 
   function convertMsg(m) {
     const text = m.message?.conversation
       || m.message?.extendedTextMessage?.text
+      || m.message?.extendedTextMessage?.canonicalUrl
       || m.message?.imageMessage?.caption
+      || m.message?.buttonsResponseMessage?.selectedDisplayText
+      || m.message?.listResponseMessage?.title
       || (m.message?.imageMessage?'🖼 Imagem':'')
       || (m.message?.videoMessage?'🎥 Vídeo':'')
       || (m.message?.audioMessage?'🎵 Áudio':'')
-      || (m.message?.documentMessage?'📄 Documento':'')
+      || (m.message?.stickerMessage?'🎭 Sticker':'')
+      || (m.message?.documentMessage?('📄 '+(m.message.documentMessage.fileName||'Documento')):'')
       || (m.message?'[mídia]':'');
     if(!text) return null;
     return {
@@ -3803,14 +3810,15 @@ async function fetchChatHistory(tel) {
       headers:{'Content-Type':'application/json','apikey':key},
       body: JSON.stringify({
         where: { key: { remoteJid: jid } },
-        limit: 50
+        limit: 100
       })
     });
     if(r.ok) {
       const d = await r.json();
       apiMsgs = extractMsgs(d);
+      console.log('findMessages result:', d?.length || (d?.messages?.records||d?.messages||[]).length, 'msgs');
     }
-  } catch(e) {}
+  } catch(e) { console.warn('fetchChatHistory err:', e); }
 
   // Alternativa: /messages/findMessages (outro path usado em algumas versões)
   if(!apiMsgs.length) {
