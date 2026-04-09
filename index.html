@@ -3865,12 +3865,15 @@ async function fetchChatHistory(tel) {
     else if(d?.messages?.records) msgs = d.messages.records;
     else if(Array.isArray(d?.messages)) msgs = d.messages;
     else if(d?.data) msgs = Array.isArray(d.data)?d.data:[];
-    // Aceitar variações do número: com/sem 55, @s.whatsapp.net, @c.us
+    // Aceitar variações: @s.whatsapp.net, @c.us, @lid, com/sem 55
     return msgs.filter(m => {
-      const rjid = (m.key?.remoteJid||'').replace('@s.whatsapp.net','').replace('@c.us','').replace(/\D/g,'');
+      const rawJid = m.key?.remoteJid||'';
+      // Para @lid não tem número — aceitar por participante ou owner
+      if(rawJid.includes('@lid')) return true; // aceitar @lid do contato aberto
+      const rjid = rawJid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'');
       const clean = telClean.replace(/^55/,'');
       const rclean = rjid.replace(/^55/,'');
-      return rjid===telClean || rclean===clean || rjid.endsWith(clean);
+      return rjid===telClean || rclean===clean || rjid.endsWith(clean) || telClean.endsWith(rclean);
     });
   }
 
@@ -3914,7 +3917,7 @@ async function fetchChatHistory(tel) {
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
       body: JSON.stringify({
-        where: { key: { remoteJid: jid } },
+        where: { key: { remoteJid: { $in: [jid, jid.replace('@s.whatsapp.net','@lid'), telClean+'@lid'] } } },
         limit: 200,
         sort: { messageTimestamp: -1 }
       })
@@ -4018,7 +4021,7 @@ async function loadAllChats() {
       headers:{'Content-Type':'application/json','apikey':key},
       body: JSON.stringify({})
     });
-    if(!res.ok) return;
+    if(!res.ok) return; // 404 = endpoint não disponível nesta versão, ignorar silenciosamente
     const d = await res.json();
     const chats = Array.isArray(d)?d:(d?.chats||d?.data||[]);
 
