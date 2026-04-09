@@ -1193,6 +1193,7 @@ input[type=range]::-moz-range-thumb{
         <div style="font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
           <span style="width:28px;height:28px;border-radius:7px;background:rgba(255,171,64,.1);display:flex;align-items:center;justify-content:center;font-size:14px">📅</span>
           Agendamentos Ativos
+          <button class="btn btn-xs btn-danger" style="margin-left:auto" onclick="limparAgendamentos()">🗑 Limpar</button>
         </div>
         <div id="ag-list">
           <div class="empty-state"><span class="empty-icon">🗓️</span><p>Nenhum agendamento criado</p></div>
@@ -2415,7 +2416,7 @@ function renderAgendamentos() {
     wrap.innerHTML='<div class="empty-state"><span class="empty-icon">🗓️</span><p>Nenhum agendamento</p></div>';
     return;
   }
-  const sorted=[...agendamentos].sort((a,b)=>a.ts-b.ts);
+  const sorted=[...agendamentos].filter(a=>a.status!=='archived').sort((a,b)=>a.ts-b.ts);
   wrap.innerHTML=sorted.map(ag=>{
     const dt=new Date(ag.ts);
     const isPast=dt<new Date();
@@ -2448,7 +2449,7 @@ function renderAgendamentos() {
           <div>${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>
           <div style="margin-top:4px">${statusBadge}</div>
         </div>
-        ${ag.status==='pending'?`<button class="btn btn-xs btn-danger" style="flex-shrink:0" onclick="cancelAgendamento('${ag.id}')">✕</button>`:''}
+        ${ag.status==='pending'?`<button class="btn btn-xs btn-amber" style="flex-shrink:0" onclick="cancelAgendamento('${ag.id}')" title="Cancelar">⏸ Cancelar</button>`:''}
       </div>
       <div style="border-top:1px solid var(--bd2);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:11px;color:var(--t3);flex-shrink:0">✉️</span>
@@ -2456,7 +2457,11 @@ function renderAgendamentos() {
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-xs btn-blue" onclick="verHistoricoAg('${ag.id}')">📋 Histórico</button>
           ${(ag.status==='pending'||ag.status==='firing')?`<button class="btn btn-xs btn-primary" onclick="dispararAgNow('${ag.id}')">🚀 Disparar agora</button>`:''}
-          ${ag.status==='atrasado'||isPast&&ag.status==='pending'?`<button class="btn btn-xs btn-amber" onclick="dispararAgNow('${ag.id}')">🔁 Reenviar</button>`:''}
+          ${isPast&&ag.status==='pending'?`<button class="btn btn-xs btn-amber" onclick="dispararAgNow('${ag.id}')">🔁 Reenviar</button>`:''}
+          ${ag.status==='done'||ag.status==='cancelled'||ag.status==='error'
+            ?`<button class="btn btn-xs" onclick="arquivarAg('${ag.id}')" title="Arquivar">📦 Arquivar</button>`
+            :''}
+          <button class="btn btn-xs btn-danger" onclick="excluirAg('${ag.id}')" title="Excluir permanentemente">🗑</button>
         </div>
       </div>
     </div>`;
@@ -2466,6 +2471,53 @@ function cancelAgendamento(id) {
   const a=agendamentos.find(x=>x.id===id);
   if(a) a.status='cancelled';
   salvarDados(); renderAgendamentos(); updBadges(); toast('Agendamento cancelado');
+}
+function excluirAg(id) {
+  showModal(`
+    <div class="modal-title">🗑 Excluir agendamento</div>
+    <p class="modal-sub">Esta ação é permanente e não pode ser desfeita.</p>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger btn-sm" onclick="_doExcluirAg('${id}')">🗑 Excluir</button>
+    </div>
+  `);
+}
+function _doExcluirAg(id) {
+  agendamentos = agendamentos.filter(a=>a.id!==id);
+  salvarDados(); renderAgendamentos(); updBadges(); closeModal();
+  toast('Agendamento excluído');
+}
+function arquivarAg(id) {
+  const a=agendamentos.find(x=>x.id===id);
+  if(a){ a.arquivado=true; a.status='archived'; }
+  salvarDados(); renderAgendamentos(); updBadges();
+  toast('Agendamento arquivado');
+}
+function limparAgendamentos() {
+  showModal(`
+    <div class="modal-title">🗑 Limpar agendamentos</div>
+    <div class="modal-sub">O que deseja remover?</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+      <button class="btn" onclick="_limparAgs('done')" style="justify-content:flex-start;gap:10px">
+        <span>✅</span><div><div style="font-weight:600">Concluídos</div><div style="font-size:11px;color:var(--t3)">Remove todos os disparados com sucesso</div></div>
+      </button>
+      <button class="btn" onclick="_limparAgs('cancelled')" style="justify-content:flex-start;gap:10px">
+        <span>🚫</span><div><div style="font-weight:600">Cancelados</div><div style="font-size:11px;color:var(--t3)">Remove todos os cancelados</div></div>
+      </button>
+      <button class="btn btn-danger" onclick="_limparAgs('all')" style="justify-content:flex-start;gap:10px">
+        <span>⚠️</span><div><div style="font-weight:600">Todos</div><div style="font-size:11px;color:var(--t3)">Remove absolutamente todos</div></div>
+      </button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Fechar</button>
+    </div>
+  `);
+}
+function _limparAgs(tipo) {
+  if(tipo==='all') agendamentos=[];
+  else agendamentos=agendamentos.filter(a=>a.status!==tipo);
+  salvarDados(); renderAgendamentos(); updBadges(); closeModal();
+  toast('Agendamentos removidos');
 }
 function startAgTimer() {
   clearInterval(agTimer);
