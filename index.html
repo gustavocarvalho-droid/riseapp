@@ -861,6 +861,7 @@ input[type=range]::-moz-range-thumb{
                 <th>Lista</th>
                 <th>Responsável</th>
                 <th>Status</th>
+                <th>CRM</th>
                 <th>Ações</th>
               </tr>
             </thead>
@@ -1724,6 +1725,14 @@ function renderC() {
     l.contatos.forEach(id=>{ if(!cListaMap[id]) cListaMap[id]=[]; cListaMap[id].push(l.nome); });
   });
 
+  // Map contact → CRM status
+  const crmMap = {};
+  crmData.forEach(x=>{ if(x.contactId) crmMap[x.contactId] = x.status; });
+
+  // CRM label map
+  const crmLabelMap = {};
+  getCRMCols().forEach(col=>{ crmLabelMap[col.id]=col.label; });
+
   const tbody = document.getElementById('ct-tbody');
   if(!tbody) return;
   tbody.innerHTML = slice.map(c => {
@@ -1733,6 +1742,24 @@ function renderC() {
       ? '<span class="badge badge-red">✗ Falha</span>'
       : '<span class="badge badge-dim">Pendente</span>';
     const cls = cListaMap[c.id]?.join(', ')||'—';
+
+    // CRM badge
+    const crmStatus = crmMap[c.id];
+    const crmBadge = crmStatus
+      ? (() => {
+          const label = crmLabelMap[crmStatus] || crmStatus;
+          const colorMap = {
+            naoresp:      'badge-dim',
+            abertura:     'badge-blue',
+            agendado:     'badge-amber',
+            followup:     'badge-purple',
+            convertido:   'badge-green',
+            seminteresse: 'badge-red',
+          };
+          const cls2 = colorMap[crmStatus] || 'badge-blue';
+          return `<span class="badge ${cls2}" style="font-size:10px">${esc(label)}</span>`;
+        })()
+      : `<span style="font-size:11px;color:var(--t3)">Não inserido</span>`;
     return `<tr>
       <td><input type="checkbox" class="c-chk" style="width:auto;cursor:pointer" data-id="${c.id}" onchange="updSel()"></td>
       <td>
@@ -1756,6 +1783,7 @@ function renderC() {
         }
       </td>
       <td>${st_badge}</td>
+      <td>${crmBadge}</td>
       <td>
         <div style="display:flex;gap:4px">
           <button class="btn btn-xs" onclick="openChat(${c.id})">💬</button>
@@ -1764,7 +1792,7 @@ function renderC() {
         </div>
       </td>
     </tr>`;
-  }).join('') || `<tr><td colspan="7"><div class="empty-state"><span class="empty-icon">👥</span><p>Nenhum contato encontrado</p></div></td></tr>`;
+  }).join('') || `<tr><td colspan="9"><div class="empty-state"><span class="empty-icon">👥</span><p>Nenhum contato encontrado</p></div></td></tr>`;
 
   // Pager
   const pager = document.getElementById('ct-pager');
@@ -2754,6 +2782,7 @@ function enviarSelecionadosCRM() {
   salvarDados(); updBadges();
   if(added > 0) {
     toast(`${added} lead(s) enviado(s) para o CRM ✓`);
+    renderC();
   } else {
     toast('Todos os contatos já estão no CRM','warn');
   }
@@ -2767,6 +2796,8 @@ function addCRM(c) {
     status:'naoresp', nota:'', updatedAt:Date.now()
   });
   salvarDados(); updBadges();
+  // Atualizar coluna CRM na tabela de contatos se estiver aberta
+  if(document.getElementById('panel-contatos')?.classList.contains('show')) renderC();
 }
 function renderCRM() {
   const srch=(document.getElementById('crm-search')?.value||'').toLowerCase();
@@ -2862,6 +2893,7 @@ function _saveCRM(id) {
   item.outroTel=document.getElementById('crm-outro-tel-inp')?.value||'';
   item.updatedAt=Date.now();
   salvarDados(); renderCRM(); updBadges(); closeModal(); toast('CRM atualizado');
+  if(document.getElementById('panel-contatos')?.classList.contains('show')) renderC();
 }
 function delCRM(id) {
   crmData=crmData.filter(c=>String(c.id)!==String(id));
