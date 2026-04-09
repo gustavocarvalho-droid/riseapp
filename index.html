@@ -1589,6 +1589,8 @@ function iniciarApp() {
     updBadges();
     startAgTimer();
     checkNum();
+    // Auto-configurar webhook silenciosamente
+    setTimeout(autoSetupWebhook, 3000);
   });
 }
 (function autoLogin(){
@@ -3670,22 +3672,37 @@ function _doDelCRMCol(id) {
 async function setupWebhook() {
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   if(!base||!key||!inst){toast('Configure a API primeiro','warn');return;}
-  // URL do webhook aponta para a Vercel function
-  const webhookUrl = window.location.origin+'/api/webhook';
+  const ok = await _doSetupWebhook(base, key, inst);
+  if(ok){toast('Webhook configurado ✓ — mensagens chegarão ao sistema');}
+  else{toast('Erro ao configurar webhook','err');}
+}
+
+async function autoSetupWebhook() {
+  const base=getApiBase();const key=getApiKey();const inst=getInst();
+  if(!base||!key||!inst) return;
+  await _doSetupWebhook(base, key, inst, true);
+}
+
+async function _doSetupWebhook(base, key, inst, silent=false) {
+  // Usar URL do próprio app como webhook
+  const webhookUrl = window.location.origin + '/api/webhook';
   try {
-    const res=await fetch(`${base}/webhook/set/${inst}`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key},
-      body:JSON.stringify({
+    const res = await fetch(`${base}/webhook/set/${inst}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','apikey':key},
+      body: JSON.stringify({
         url: webhookUrl,
         webhook_by_events: true,
         webhook_base64: false,
-        events:['MESSAGES_UPSERT']
+        events: ['MESSAGES_UPSERT','MESSAGES_UPDATE','CONNECTION_UPDATE']
       })
     });
-    if(res.ok){toast('Webhook configurado ✓ — mensagens chegarão ao sistema');}
-    else{toast('Erro ao configurar webhook','err');}
-  } catch(e){toast('Erro: '+e.message,'err');}
+    if(!silent && res.ok) console.log('Webhook configurado:', webhookUrl);
+    return res.ok;
+  } catch(e) {
+    if(!silent) console.warn('Webhook error:', e.message);
+    return false;
+  }
 }
 
 // Processar mensagem recebida via webhook
@@ -3698,8 +3715,15 @@ function receberMensagem(data) {
     const rjid = msg.key?.remoteJid||'';
     // Ignorar grupos
     if(rjid.includes('@g.us')) return;
-    const tel = rjid.replace('@s.whatsapp.net','').replace(/\D/g,'');
-    if(!tel||tel.length < 8) return;
+
+    // Tratar @lid — usar pushName como identificador
+    const isLid = rjid.includes('@lid');
+    let tel = rjid.replace('@s.whatsapp.net','').replace('@lid','').replace(/[^0-9]/g,'');
+    const pushName = msg.pushName || msg.data?.pushName || '';
+
+    // Para @lid sem número, usar o lid como ID único
+    const contactId = isLid ? ('lid_'+rjid.replace('@lid','')) : tel;
+    if(!contactId || contactId.length < 3) return;
 
     const text = msg.message?.conversation
       || msg.message?.extendedTextMessage?.text
@@ -3717,12 +3741,16 @@ function receberMensagem(data) {
     if(msgId && processedMsgIds.has(msgId)) return;
     if(msgId) processedMsgIds.add(msgId);
 
-    // Encontrar contato pelo número exato
-    const contact = contacts.find(c=>{
-      const ct=c.tel.replace(/\D/g,'');
+    // Encontrar contato pelo número ou pelo lid
+    let contact = contacts.find(c=>{
+      const ct=(c.tel||'').replace(/[^0-9]/g,'');
       return ct===tel || ('55'+ct)===tel || ct===('55'+tel);
     });
-    const cId = contact?.id||tel;
+    // Para @lid, tentar achar pelo pushName
+    if(!contact && isLid && pushName) {
+      contact = contacts.find(c=>(c.nome||'').toLowerCase()===pushName.toLowerCase());
+    }
+    const cId = contact?.id || contactId;
 
     // Adicionar ao chatLogs APENAS deste contato
     if(!chatLogs[cId]) chatLogs[cId]=[];
@@ -3746,15 +3774,22 @@ function receberMensagem(data) {
 
     // Se não está nos contatos, adicionar ao inbox
     if(!contact) {
-      const existInbox = inboxContacts.find(x=>x.tel===tel||x.tel===('55'+tel));
+      const existInbox = inboxContacts.find(x=>x.id===('inbox_'+contactId)||x.tel===tel);
       if(!existInbox) {
+        const displayName = pushName || (tel.length>8?fmt(tel):rjid.slice(0,12));
         const newInbox = {
-          id: 'inbox_'+tel,
-          tel, nome: tel, empresa: '',
-          status: 'inbox', addedAt: Date.now()
+          id: 'inbox_'+contactId,
+          tel: isLid ? rjid : tel,
+          nome: displayName,
+          empresa: isLid ? '(número oculto)' : '',
+          status: 'inbox',
+          addedAt: Date.now(),
+          isLid
         };
         inboxContacts.push(newInbox);
-        toast(`📨 Nova conversa de ${fmt(tel)}`,'info');
+        toast(`📨 Nova conversa: ${displayName}`,'info');
+      } else if(pushName && !existInbox.nome) {
+        existInbox.nome = pushName;
       }
     }
 
