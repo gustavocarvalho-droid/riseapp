@@ -2100,7 +2100,10 @@ function renderChatHistory() {
   const body = document.getElementById('chat-body');
   // Try by id first, then by tel
   const tel = (chatContact?.tel||'').replace(/[^0-9]/g,'');
-  const msgs = chatLogs[chatContact?.id] || chatLogs[tel] || chatLogs['inbox_'+tel] || [];
+  const cId = chatContact?.id||tel;
+  // Try multiple keys: id, tel, inbox_tel, inbox_lid
+  const msgs = chatLogs[cId] || chatLogs[tel] || chatLogs['inbox_'+tel]
+    || chatLogs['inbox_'+cId] || chatLogs['lid_'+tel] || [];
   if(!msgs.length){
     body.innerHTML=`<div class="empty-state"><span class="empty-icon">💬</span><p>Nenhuma mensagem ainda. Clique em "Enviar Mensagem" para iniciar.</p></div>`;
     return;
@@ -3853,20 +3856,22 @@ async function pollMessages() {
         hasNew = true;
       });
       lastPollTs = Date.now();
-      // Se tem conversa aberta, recarregar histórico
-      if(hasNew && chatContact) fetchChatHistory(chatContact.tel||chatContact.id);
+      // Recarregar histórico da conversa aberta para pegar fromMe correto
+      if(hasNew && chatContact) {
+        setTimeout(()=>fetchChatHistory(chatContact.tel||chatContact.id), 500);
+      }
       return;
     }
   } catch(e){}
 
-  // Fallback sem filtro de timestamp (v1.7.4 pode não suportar $gte)
+  // Fallback: busca sem filtro de timestamp, filtra localmente
   try {
     const res2 = await fetch(`${base}/chat/findMessages/${inst}`, {
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
       body: JSON.stringify({
         where: { key: { fromMe: false } },
-        limit: 30
+        limit: 50
       })
     });
     if(res2.ok) {
@@ -3875,7 +3880,7 @@ async function pollMessages() {
       let hasNew = false;
       msgs.forEach(msg=>{
         const ts = msg.messageTimestamp||0;
-        if(ts < cutoffTs) return; // ignorar antigas
+        if(ts < cutoffTs) return;
         const msgId = msg.key?.id;
         if(msgId && processedMsgIds.has(msgId)) return;
         if(msgId) processedMsgIds.add(msgId);
@@ -3883,7 +3888,9 @@ async function pollMessages() {
         hasNew = true;
       });
       lastPollTs = Date.now();
-      if(hasNew && chatContact) fetchChatHistory(chatContact.tel||chatContact.id);
+      if(hasNew && chatContact) {
+        setTimeout(()=>fetchChatHistory(chatContact.tel||chatContact.id), 500);
+      }
     }
   } catch(e){}
 }
