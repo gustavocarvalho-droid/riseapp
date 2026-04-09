@@ -3795,25 +3795,33 @@ async function fetchChatHistory(tel) {
 
   let apiMsgs = [];
 
-  // Tentar endpoint 1: GET /chat/findMessages/{inst}/{jid}
+  // Evolution API v1.7.x — endpoint correto
+  // POST /chat/findMessages/{instance}
   try {
-    const r1 = await fetch(`${base}/chat/findMessages/${inst}/${encodeURIComponent(jid)}`, {
-      headers:{'apikey':key}
+    const r = await fetch(`${base}/chat/findMessages/${inst}`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':key},
+      body: JSON.stringify({
+        where: { key: { remoteJid: jid } },
+        limit: 50
+      })
     });
-    if(r1.ok) {
-      const d = await r1.json();
-      const msgs = extractMsgs(d);
-      if(msgs.length) { apiMsgs = msgs; }
+    if(r.ok) {
+      const d = await r.json();
+      apiMsgs = extractMsgs(d);
     }
   } catch(e) {}
 
-  // Tentar endpoint 2: POST /chat/findMessages/{inst}
+  // Alternativa: /messages/findMessages (outro path usado em algumas versões)
   if(!apiMsgs.length) {
     try {
-      const r2 = await fetch(`${base}/chat/findMessages/${inst}`, {
+      const r2 = await fetch(`${base}/messages/findMessages/${inst}`, {
         method:'POST',
         headers:{'Content-Type':'application/json','apikey':key},
-        body: JSON.stringify({ where:{ key:{ remoteJid:jid } }, limit:50 })
+        body: JSON.stringify({
+          where: { key: { remoteJid: jid } },
+          limit: 50
+        })
       });
       if(r2.ok) {
         const d = await r2.json();
@@ -3822,30 +3830,25 @@ async function fetchChatHistory(tel) {
     } catch(e) {}
   }
 
-  // Tentar endpoint 3: GET /message/findMessages/{inst}?remoteJid=...
+  // Se ainda não encontrou — buscar todos e filtrar localmente
   if(!apiMsgs.length) {
     try {
-      const r3 = await fetch(`${base}/message/findMessages/${inst}?remoteJid=${encodeURIComponent(jid)}&limit=50`, {
-        headers:{'apikey':key}
+      const r3 = await fetch(`${base}/chat/findMessages/${inst}`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','apikey':key},
+        body: JSON.stringify({ where:{}, limit: 200 })
       });
       if(r3.ok) {
         const d = await r3.json();
-        apiMsgs = extractMsgs(d);
-      }
-    } catch(e) {}
-  }
-
-  // Tentar endpoint 4: POST /chat/findMessages/{inst} sem filtro e filtrar localmente
-  if(!apiMsgs.length) {
-    try {
-      const r4 = await fetch(`${base}/chat/findMessages/${inst}`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json','apikey':key},
-        body: JSON.stringify({ limit:100 })
-      });
-      if(r4.ok) {
-        const d = await r4.json();
-        apiMsgs = extractMsgs(d);
+        // Filtrar localmente por este número
+        let all = [];
+        if(Array.isArray(d)) all=d;
+        else if(d?.messages?.records) all=d.messages.records;
+        else if(Array.isArray(d?.messages)) all=d.messages;
+        apiMsgs = all.filter(m=>{
+          const rjid=m.key?.remoteJid||'';
+          return rjid===jid||rjid.startsWith(telClean);
+        });
       }
     } catch(e) {}
   }
@@ -3861,6 +3864,25 @@ async function fetchChatHistory(tel) {
       converted.filter(m=>m.dir==='in').forEach(m=>{
         if(!processedMsgIds.has(m.id)) processedMsgIds.add(m.id);
       });
+    }
+  }
+
+  if(!apiMsgs.length) {
+    // API não tem histórico — mostrar aviso mas manter mensagens locais
+    const existingLocal = chatLogs[cId]||[];
+    if(!existingLocal.length) {
+      const b=document.getElementById('chat-body');
+      if(b&&chatContact?.id===cId) {
+        b.innerHTML=`<div class="empty-state">
+          <span class="empty-icon">💬</span>
+          <p>Histórico não disponível na API</p>
+          <div style="font-size:11px;color:var(--t3);margin-top:8px;max-width:280px">
+            A Evolution API v1.7 armazena mensagens apenas quando há banco de dados (MongoDB/PostgreSQL) configurado.
+            As mensagens enviadas pelo Rise WA aparecem aqui.
+          </div>
+        </div>`;
+        return;
+      }
     }
   }
 
