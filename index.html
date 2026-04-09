@@ -2096,7 +2096,9 @@ function openChatWindow(id) {
 }
 function renderChatHistory() {
   const body = document.getElementById('chat-body');
-  const msgs = chatLogs[chatContact?.id]||[];
+  // Try by id first, then by tel
+  const tel = (chatContact?.tel||'').replace(/[^0-9]/g,'');
+  const msgs = chatLogs[chatContact?.id] || chatLogs[tel] || chatLogs['inbox_'+tel] || [];
   if(!msgs.length){
     body.innerHTML=`<div class="empty-state"><span class="empty-icon">💬</span><p>Nenhuma mensagem ainda. Clique em "Enviar Mensagem" para iniciar.</p></div>`;
     return;
@@ -3873,19 +3875,25 @@ async function fetchChatHistory(tel) {
   }
 
   function convertMsg(m) {
+    // Ignorar mensagens com message vazio (sem conteúdo real)
+    if(!m.message || Object.keys(m.message).length === 0) return null;
+
     const text = m.message?.conversation
       || m.message?.extendedTextMessage?.text
       || m.message?.extendedTextMessage?.canonicalUrl
       || m.message?.imageMessage?.caption
       || m.message?.buttonsResponseMessage?.selectedDisplayText
       || m.message?.listResponseMessage?.title
+      || m.message?.templateMessage?.hydratedTemplate?.hydratedContentText
       || (m.message?.imageMessage?'🖼 Imagem':'')
       || (m.message?.videoMessage?'🎥 Vídeo':'')
       || (m.message?.audioMessage?'🎵 Áudio':'')
       || (m.message?.stickerMessage?'🎭 Sticker':'')
+      || (m.message?.reactionMessage?'👍 Reação':'')
       || (m.message?.documentMessage?('📄 '+(m.message.documentMessage.fileName||'Documento')):'')
-      || (m.message?'[mídia]':'');
-    if(!text) return null;
+      || (m.message?.protocolMessage?null:'')
+      || '[mídia]';
+    if(!text || text === null) return null;
     return {
       id: m.key?.id||uid(),
       text,
@@ -3907,13 +3915,14 @@ async function fetchChatHistory(tel) {
       headers:{'Content-Type':'application/json','apikey':key},
       body: JSON.stringify({
         where: { key: { remoteJid: jid } },
-        limit: 100
+        limit: 200,
+        sort: { messageTimestamp: -1 }
       })
     });
     if(r.ok) {
       const d = await r.json();
       apiMsgs = extractMsgs(d);
-      console.log('findMessages result:', d?.length || (d?.messages?.records||d?.messages||[]).length, 'msgs');
+      console.log('findMessages result:', apiMsgs.length, 'msgs for', jid);
     }
   } catch(e) { console.warn('fetchChatHistory err:', e); }
 
@@ -3966,6 +3975,8 @@ async function fetchChatHistory(tel) {
 
     if(converted.length) {
       chatLogs[cId] = converted;
+      // Also store by tel for easy lookup
+      chatLogs[telClean] = converted;
       converted.filter(m=>m.dir==='in').forEach(m=>{
         if(!processedMsgIds.has(m.id)) processedMsgIds.add(m.id);
       });
