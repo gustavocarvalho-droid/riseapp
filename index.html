@@ -1321,28 +1321,29 @@ input[type=range]::-moz-range-thumb{
     <!-- ══════════ CONFIG ══════════ -->
     <div class="panel" id="panel-config">
       <div class="card">
-        <div class="card-title"><span class="icon">🔌</span>Evolution API</div>
+        <div class="card-title"><span class="icon">🔌</span>Evolution API — Configuração Global</div>
+        <div style="background:var(--glow2);border:1px solid var(--bd);border-radius:9px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--t2)">
+          💡 A <b style="color:var(--t)">URL</b> e <b style="color:var(--t)">API Key</b> são compartilhadas. Cada usuário configura sua própria <b style="color:var(--g)">Instância (número)</b>.
+        </div>
         <div class="field-row">
           <div class="field">
-            <label>URL da API</label>
+            <label>URL da API (global)</label>
             <input type="text" id="cf-url" placeholder="https://sua-api.dominio.com">
           </div>
           <div class="field">
-            <label>API Key</label>
+            <label>API Key (global)</label>
             <input type="password" id="cf-key" placeholder="••••••••••••">
           </div>
         </div>
-        <div class="field">
-          <label>Nome da Instância</label>
-          <input type="text" id="cf-inst" placeholder="minha-instancia">
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
           <button class="btn btn-sm btn-blue" onclick="testConn()">🧪 Testar conexão</button>
-          <button class="btn btn-primary btn-sm" onclick="saveConf()">💾 Salvar</button>
+          <button class="btn btn-primary btn-sm" onclick="saveConf()">💾 Salvar global</button>
           <button class="btn btn-sm btn-amber" onclick="setupWebhook()">🔔 Configurar Webhook</button>
         </div>
-        <div style="font-size:11px;color:var(--t3);margin-top:8px">💡 O Webhook permite receber respostas diretamente no sistema (aba Conversas)</div>
-        <div id="cf-status" style="margin-top:10px;font-size:12px"></div>
+        <div id="cf-status" style="font-size:12px;margin-bottom:10px"></div>
+        <hr style="border:none;border-top:1px solid var(--bd2);margin:14px 0">
+        <div class="card-title" style="margin-bottom:10px"><span class="icon">📱</span>Instâncias por Usuário</div>
+        <div id="user-instances-list"></div>
       </div>
       <div class="card">
         <div class="card-title"><span class="icon">👥</span>Usuários do Sistema</div>
@@ -1444,11 +1445,21 @@ function getUsers() {
 function saveUsers(u) { localStorage.setItem('rise_users', JSON.stringify(u)); }
 
 // ── CONFIG ──
+function getCfgKey() {
+  return CFG_KEY + '_' + (currentUser?.key||'default');
+}
 function getCfg() {
-  try { return JSON.parse(localStorage.getItem(CFG_KEY)) || {}; }
+  try {
+    // Primeiro tenta config do usuário atual, fallback para config global
+    const userCfg = JSON.parse(localStorage.getItem(getCfgKey()));
+    if(userCfg && (userCfg.url||userCfg.inst)) return userCfg;
+    return JSON.parse(localStorage.getItem(CFG_KEY)) || {};
+  }
   catch(e) { return {}; }
 }
-function saveCfgLocal(c) { localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
+function saveCfgLocal(c) {
+  localStorage.setItem(getCfgKey(), JSON.stringify(c));
+}
 function getApiBase(){ return (getCfg().url||'').replace(/\/$/,''); }
 function getApiKey() { return getCfg().key||''; }
 function getInst()   { return getCfg().inst||''; }
@@ -1540,6 +1551,16 @@ function iniciarApp() {
     if(cfgNav) cfgNav.style.display='none';
   }
   loadCfgToForm();
+  // Ensure user has URL+Key from global config
+  const globalCfg2 = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+  if(globalCfg2.url||globalCfg2.key) {
+    const userCfgCheck = JSON.parse(localStorage.getItem(CFG_KEY+'_'+(currentUser?.key||''))||'{}');
+    if(!userCfgCheck.url) {
+      localStorage.setItem(CFG_KEY+'_'+(currentUser?.key||''), JSON.stringify({
+        ...userCfgCheck, url:globalCfg2.url, key:globalCfg2.key
+      }));
+    }
+  }
   carregarDados().then(()=>{
     startPolling();
     renderC();
@@ -2834,20 +2855,26 @@ async function trocarNum() {
 
 // ── CONFIG ──
 function loadCfgToForm() {
-  const c=getCfg();
+  const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
   const u=el=>document.getElementById(el);
-  if(u('cf-url')) u('cf-url').value=c.url||'';
-  if(u('cf-key')) u('cf-key').value=c.key||'';
-  if(u('cf-inst')) u('cf-inst').value=c.inst||'';
+  if(u('cf-url')) u('cf-url').value=globalCfg.url||'';
+  if(u('cf-key')) u('cf-key').value=globalCfg.key||'';
 }
 function saveConf() {
-  saveCfgLocal({
-    url:(document.getElementById('cf-url')?.value||'').trim(),
-    key:(document.getElementById('cf-key')?.value||'').trim(),
-    inst:(document.getElementById('cf-inst')?.value||'').trim()
+  const url=(document.getElementById('cf-url')?.value||'').trim();
+  const key=(document.getElementById('cf-key')?.value||'').trim();
+  // Save URL+Key globally (shared)
+  const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+  localStorage.setItem(CFG_KEY, JSON.stringify({...globalCfg, url, key}));
+  // Update all user configs with new URL+Key
+  const users=getUsers();
+  Object.keys(users).forEach(k=>{
+    const uc=JSON.parse(localStorage.getItem(CFG_KEY+'_'+k)||'{}');
+    localStorage.setItem(CFG_KEY+'_'+k, JSON.stringify({...uc, url, key}));
   });
-  toast('Configurações salvas ✓');
+  toast('Configurações globais salvas ✓');
   checkNum();
+  renderConfig();
 }
 async function testConn() {
   const url=(document.getElementById('cf-url')?.value||'').trim();
@@ -2904,17 +2931,81 @@ function renderConfig() {
   loadCfgToForm();
   const users=getUsers();
   const wrap=document.getElementById('users-list');
-  if(!wrap) return;
-  wrap.innerHTML=Object.entries(users).map(([k,u])=>`
-    <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--bd2)">
-      <div class="user-av" style="width:32px;height:32px;font-size:11px;flex-shrink:0">${k.slice(0,2).toUpperCase()}</div>
-      <div style="flex:1">
-        <div style="font-size:13px;font-weight:600">${esc(u.name)}</div>
-        <div style="font-size:11px;color:var(--t3)">${u.master?'🔑 Master':'👤 Usuário'}</div>
+  if(wrap) {
+    wrap.innerHTML=Object.entries(users).map(([k,u])=>`
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--bd2)">
+        <div class="user-av" style="width:32px;height:32px;font-size:11px;flex-shrink:0">${k.slice(0,2).toUpperCase()}</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600">${esc(u.name)}</div>
+          <div style="font-size:11px;color:var(--t3)">${u.master?'🔑 Master':'👤 Usuário'}</div>
+        </div>
+        <button class="btn btn-xs" onclick="changePwd('${k}')">🔑 Senha</button>
       </div>
-      <button class="btn btn-xs" onclick="changePwd('${k}')">🔑 Senha</button>
+    `).join('');
+  }
+  // Render user instances
+  const instWrap = document.getElementById('user-instances-list');
+  if(instWrap) {
+    const globalUrl = (JSON.parse(localStorage.getItem(CFG_KEY)||'{}')).url||'';
+    const globalKey = (JSON.parse(localStorage.getItem(CFG_KEY)||'{}')).key||'';
+    instWrap.innerHTML = Object.entries(users).map(([k,u])=>{
+      const userCfg = JSON.parse(localStorage.getItem(CFG_KEY+'_'+k)||'{}');
+      const inst = userCfg.inst||'';
+      const isMe = k === currentUser?.key;
+      return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--s2);border:1px solid ${isMe?'var(--bd)':'var(--bd2)'};border-radius:10px;margin-bottom:8px">
+        <div class="user-av" style="width:34px;height:34px;font-size:11px;flex-shrink:0;${isMe?'background:linear-gradient(135deg,var(--g2),#003820)':''}">${k.slice(0,2).toUpperCase()}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${esc(u.name)} ${isMe?'<span style="font-size:10px;color:var(--g);font-family:var(--mono)">(você)</span>':''}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:2px;font-family:var(--mono)">${inst?'📱 '+esc(inst):'<span style="color:var(--amber)">⚠ Sem instância configurada</span>'}</div>
+        </div>
+        ${isMe||currentUser?.master?`<button class="btn btn-xs btn-blue" onclick="editUserInst('${k}')">✏️ Editar</button>`:''}
+      </div>`;
+    }).join('');
+  }
+}
+
+function editUserInst(userKey) {
+  const users = getUsers();
+  const u = users[userKey];
+  const userCfg = JSON.parse(localStorage.getItem(CFG_KEY+'_'+userKey)||'{}');
+  const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+  showModal(`
+    <div class="modal-title">📱 Instância de ${esc(u?.name||userKey)}</div>
+    <div class="modal-sub">Configure o número WhatsApp deste usuário</div>
+    <div class="field">
+      <label>Nome da Instância</label>
+      <input type="text" id="edit-inst-val" placeholder="Ex: zapdisparo2" value="${esc(userCfg.inst||'')}">
     </div>
-  `).join('');
+    <div style="font-size:12px;color:var(--t3);margin-bottom:12px">
+      URL e API Key são herdadas da configuração global:<br>
+      <span style="font-family:var(--mono);color:var(--t2)">${esc(globalCfg.url||'não configurada')}</span>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="_saveUserInst('${userKey}')">💾 Salvar</button>
+    </div>
+  `);
+  setTimeout(()=>document.getElementById('edit-inst-val')?.focus(),100);
+}
+
+function _saveUserInst(userKey) {
+  const inst = document.getElementById('edit-inst-val')?.value?.trim();
+  const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+  const userCfg = {
+    url: globalCfg.url||'',
+    key: globalCfg.key||'',
+    inst: inst||''
+  };
+  localStorage.setItem(CFG_KEY+'_'+userKey, JSON.stringify(userCfg));
+  closeModal();
+  renderConfig();
+  // Se for o usuário atual, atualizar status
+  if(userKey===currentUser?.key) {
+    toast(`Instância atualizada: ${inst}`);
+    checkNum();
+  } else {
+    toast(`Instância de ${getUsers()[userKey]?.name} atualizada`);
+  }
 }
 function changePwd(key) {
   showModal(`
