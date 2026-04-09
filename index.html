@@ -876,9 +876,14 @@ input[type=range]::-moz-range-thumb{
       <div class="chat-wrap">
         <div class="contacts-list">
           <div class="contacts-list-header">
-            <div class="search-bar" style="margin-bottom:0">
+            <div class="search-bar" style="margin-bottom:8px">
               <span class="search-icon">🔍</span>
               <input type="text" id="chat-search" placeholder="Buscar contato..." oninput="renderChatList()">
+            </div>
+            <div style="display:flex;gap:4px;padding:0 2px">
+              <button id="chat-tab-historico" class="btn btn-xs btn-primary" style="flex:1;justify-content:center;font-size:11px" onclick="setChatTab('historico')">💬 Histórico</button>
+              <button id="chat-tab-novos" class="btn btn-xs" style="flex:1;justify-content:center;font-size:11px" onclick="setChatTab('novos')">🆕 Novos</button>
+              <button id="chat-tab-todos" class="btn btn-xs" style="flex:1;justify-content:center;font-size:11px" onclick="setChatTab('todos')">👥 Todos</button>
             </div>
           </div>
           <div class="contacts-list-body" id="chat-list"></div>
@@ -1427,7 +1432,22 @@ let fireTimer = null;
 let filaIdx = 0;
 let chatContact = null;
 let chatLogs = {};
-let inboxContacts = []; // Contatos que iniciaram conversa mas não estão na lista
+let inboxContacts = [];
+let chatTab = 'historico'; // historico | novos | todos
+
+function setChatTab(tab) {
+  chatTab = tab;
+  ['historico','novos','todos'].forEach(t => {
+    const btn = document.getElementById('chat-tab-'+t);
+    if(btn) {
+      btn.className = 'btn btn-xs' + (t===tab?' btn-primary':'');
+      btn.style.flex='1';
+      btn.style.justifyContent='center';
+      btn.style.fontSize='11px';
+    }
+  });
+  renderChatList();
+} // Contatos que iniciaram conversa mas não estão na lista
 let ctPage = 0;
 const CT_PER_PAGE = 50;
 let agTimer = null;
@@ -1984,27 +2004,7 @@ function renderChatList() {
   const list = document.getElementById('chat-list');
   if(!list) return;
 
-  // Contatos com histórico (enviaram ou receberam)
-  const withHistory = contacts.filter(c => {
-    const hasLog = chatLogs[c.id] && chatLogs[c.id].length > 0;
-    const matchSearch = !srch||`${c.nome||''} ${c.tel||''}`.toLowerCase().includes(srch);
-    return hasLog && matchSearch;
-  });
-
-  // Contatos sem histórico mas que combinam com a busca
-  const withoutHistory = contacts.filter(c => {
-    const hasLog = chatLogs[c.id] && chatLogs[c.id].length > 0;
-    const matchSearch = !srch||`${c.nome||''} ${c.tel||''}`.toLowerCase().includes(srch);
-    return !hasLog && matchSearch;
-  });
-
-  // Inbox: quem chamou mas não está nos contatos
-  const filteredInbox = inboxContacts.filter(c =>
-    !srch||`${c.nome||''} ${c.tel||''}`.toLowerCase().includes(srch)
-  );
-
-  // Ordenar por última mensagem
-  const sortByLast = arr => arr.sort((a,b) => {
+  const sortByLast = arr => [...arr].sort((a,b) => {
     const aLogs = chatLogs[a.id]||[];
     const bLogs = chatLogs[b.id]||[];
     const aTs = aLogs[aLogs.length-1]?.ts||0;
@@ -2012,11 +2012,33 @@ function renderChatList() {
     return bTs - aTs;
   });
 
-  const allWithHistory = sortByLast([...withHistory, ...filteredInbox]);
-  const allItems = [...allWithHistory, ...withoutHistory];
+  const matchSearch = c => !srch||`${c.nome||''} ${c.tel||''} ${c.empresa||''}`.toLowerCase().includes(srch);
 
-  if(!allItems.length && !filteredInbox.length) {
-    list.innerHTML='<div class="empty-state"><span class="empty-icon">💬</span><p>Nenhuma conversa ainda</p></div>';
+  let allItems = [];
+
+  if(chatTab === 'historico') {
+    // Apenas contatos que têm histórico de mensagens
+    const withHistory = contacts.filter(c => chatLogs[c.id]?.length > 0 && matchSearch(c));
+    const inboxFiltered = inboxContacts.filter(c => matchSearch(c));
+    allItems = sortByLast([...withHistory, ...inboxFiltered]);
+  } else if(chatTab === 'novos') {
+    // Apenas inbox (quem chamou mas não está nos contatos)
+    allItems = inboxContacts.filter(c => matchSearch(c));
+  } else {
+    // Todos os contatos
+    const withHistory = contacts.filter(c => chatLogs[c.id]?.length > 0 && matchSearch(c));
+    const withoutHistory = contacts.filter(c => !(chatLogs[c.id]?.length > 0) && matchSearch(c));
+    const inboxFiltered = inboxContacts.filter(c => matchSearch(c));
+    allItems = [...sortByLast([...withHistory, ...inboxFiltered]), ...withoutHistory];
+  }
+
+  if(!allItems.length) {
+    const msgs = {
+      historico: '💬 Nenhuma conversa com histórico',
+      novos: '🆕 Nenhuma conversa nova',
+      todos: '👥 Nenhum contato encontrado'
+    };
+    list.innerHTML=`<div class="empty-state"><span class="empty-icon">💬</span><p>${msgs[chatTab]||''}</p></div>`;
     return;
   }
 
