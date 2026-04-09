@@ -3811,7 +3811,7 @@ function receberMensagem(data) {
 
 // Polling de mensagens (alternativa ao webhook)
 let pollTimer = null;
-let lastPollTs = Date.now();
+let lastPollTs = Date.now() - 60000; // Começa 60s atrás para pegar mensagens recentes
 let processedMsgIds = new Set();
 
 async function startPolling() {
@@ -3823,58 +3823,68 @@ async function startPolling() {
 async function pollMessages() {
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   if(!base||!key||!inst) return;
+
+  // Buscar mensagens recebidas desde o último poll
+  const cutoffTs = Math.floor(lastPollTs/1000) - 5; // 5s de margem
   try {
-    // Endpoint correto para Evolution API v1.x — busca mensagens recentes
-    const res=await fetch(`${base}/chat/findMessages/${inst}`, {
+    const res = await fetch(`${base}/chat/findMessages/${inst}`, {
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
-      body:JSON.stringify({
-        where:{ key:{ fromMe:false } },
-        limit:20
+      body: JSON.stringify({
+        where: {
+          key: { fromMe: false },
+          messageTimestamp: { $gte: cutoffTs }
+        },
+        limit: 50
       })
     });
     if(res.ok) {
-      const d=await res.json();
-      const msgs=Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
-      // Filtrar apenas mensagens novas
-      const cutoff=lastPollTs/1000;
+      const d = await res.json();
+      const msgs = Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
+      let hasNew = false;
       msgs.forEach(msg=>{
-        const ts=msg.messageTimestamp||msg.messageTimestamp;
-        if(ts && ts < cutoff) return;
-        const msgId=msg.key?.id;
+        const ts = msg.messageTimestamp||0;
+        if(ts < cutoffTs) return;
+        const msgId = msg.key?.id;
         if(msgId && processedMsgIds.has(msgId)) return;
         if(msgId) processedMsgIds.add(msgId);
-        if(processedMsgIds.size>500) processedMsgIds=new Set([...processedMsgIds].slice(-200));
+        if(processedMsgIds.size>1000) processedMsgIds=new Set([...processedMsgIds].slice(-500));
         receberMensagem({data:msg});
+        hasNew = true;
       });
-      lastPollTs=Date.now();
+      lastPollTs = Date.now();
+      // Se tem conversa aberta, recarregar histórico
+      if(hasNew && chatContact) fetchChatHistory(chatContact.tel||chatContact.id);
       return;
     }
   } catch(e){}
 
-  // Fallback: tentar endpoint alternativo v1.7.x
+  // Fallback sem filtro de timestamp (v1.7.4 pode não suportar $gte)
   try {
-    const contacts_list = contacts.filter(c=>c.status==='enviado').slice(0,20);
-    for(const c of contacts_list) {
-      const res2=await fetch(`${base}/chat/findMessages/${inst}`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json','apikey':key},
-        body:JSON.stringify({
-          where:{ key:{ remoteJid: c.tel+'@s.whatsapp.net', fromMe:false } },
-          limit:5
-        })
-      });
-      if(!res2.ok) continue;
-      const d2=await res2.json();
-      const msgs2=Array.isArray(d2)?d2:(d2?.messages?.records||d2?.messages||[]);
-      msgs2.forEach(msg=>{
-        const msgId=msg.key?.id;
+    const res2 = await fetch(`${base}/chat/findMessages/${inst}`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':key},
+      body: JSON.stringify({
+        where: { key: { fromMe: false } },
+        limit: 30
+      })
+    });
+    if(res2.ok) {
+      const d = await res2.json();
+      const msgs = Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
+      let hasNew = false;
+      msgs.forEach(msg=>{
+        const ts = msg.messageTimestamp||0;
+        if(ts < cutoffTs) return; // ignorar antigas
+        const msgId = msg.key?.id;
         if(msgId && processedMsgIds.has(msgId)) return;
         if(msgId) processedMsgIds.add(msgId);
         receberMensagem({data:msg});
+        hasNew = true;
       });
+      lastPollTs = Date.now();
+      if(hasNew && chatContact) fetchChatHistory(chatContact.tel||chatContact.id);
     }
-    lastPollTs=Date.now();
   } catch(e){}
 }
 
