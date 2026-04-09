@@ -2958,7 +2958,7 @@ function renderConfig() {
           <div style="font-size:13px;font-weight:600">${esc(u.name)} ${isMe?'<span style="font-size:10px;color:var(--g);font-family:var(--mono)">(você)</span>':''}</div>
           <div style="font-size:11px;color:var(--t3);margin-top:2px;font-family:var(--mono)">${inst?'📱 '+esc(inst):'<span style="color:var(--amber)">⚠ Sem instância configurada</span>'}</div>
         </div>
-        ${isMe||currentUser?.master?`<button class="btn btn-xs btn-blue" onclick="editUserInst('${k}')">✏️ Editar</button>`:''}
+        <button class="btn btn-xs btn-blue" onclick="editUserInst('${k}')">✏️ Editar</button>
       </div>`;
     }).join('');
   }
