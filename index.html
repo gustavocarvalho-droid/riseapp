@@ -1336,7 +1336,7 @@ input[type=range]::-moz-range-thumb{
       <div class="grid4 mb-4">
         <div class="stat-card stat-green">
           <div class="stat-num" id="hd-total-sessoes">0</div>
-          <div class="stat-label">Sessões</div>
+          <div class="stat-label">Dias</div>
         </div>
         <div class="stat-card stat-green">
           <div class="stat-num" id="hd-total-env">0</div>
@@ -1354,7 +1354,7 @@ input[type=range]::-moz-range-thumb{
       <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
         <div class="search-bar" style="flex:1;min-width:200px;margin-bottom:0">
           <span class="search-icon">🔍</span>
-          <input type="text" id="hd-search" placeholder="Buscar por lista, responsável..." oninput="renderHistoricoDisparos()">
+          <input type="text" id="hd-search" placeholder="Buscar por nome, telefone, empresa, responsável..." oninput="renderHistoricoDisparos()">
         </div>
         <select id="hd-resp-filter" style="width:auto;min-width:160px" onchange="renderHistoricoDisparos()">
           <option value="">Todos responsáveis</option>
@@ -4008,108 +4008,127 @@ function renderHistoricoDisparos() {
   const srch = (document.getElementById('hd-search')?.value||'').toLowerCase();
   const respF = document.getElementById('hd-resp-filter')?.value||'';
 
-  // Agrupar logs por sessionId (ou agId como fallback)
-  const sessionMap = {};
-  logs.forEach(l => {
-    const sid = l.sessionId || ('solo_'+l.id);
-    if(!sessionMap[sid]) {
-      sessionMap[sid] = {
-        id: sid,
-        listaNome: l.listaNome || l.agId ? (agendamentos.find(a=>a.id===l.agId)?.nome||'Agendamento') : 'Disparo Manual',
-        startedAt: l.sessionStartedAt || l.time,
-        enviadoPor: l.enviadoPor||'—',
-        entries: []
-      };
-    }
-    sessionMap[sid].entries.push(l);
-  });
+  // Fonte de logs: master vê tudo, outros só os seus
+  const isMaster = currentUser?.master;
+  const srcLogs = isMaster ? allLogs : logs;
 
-  let sessions = Object.values(sessionMap).sort((a,b)=>{
-    // Ordenar pela data do log mais recente da sessão
-    const aT = a.entries[0]?.time||'';
-    const bT = b.entries[0]?.time||'';
-    return bT.localeCompare(aT);
-  });
+  // Filtrar por responsável
+  let logsF = respF ? srcLogs.filter(l=>(l.enviadoPor||l._owner||'')===respF) : srcLogs;
 
-  // Filtros
-  if(srch) sessions = sessions.filter(s=>
-    s.listaNome.toLowerCase().includes(srch) ||
-    s.enviadoPor.toLowerCase().includes(srch)
+  // Filtrar por busca (nome, telefone, empresa)
+  if(srch) logsF = logsF.filter(l=>
+    (l.nome||'').toLowerCase().includes(srch) ||
+    (l.tel||'').includes(srch) ||
+    (l.empresa||'').toLowerCase().includes(srch) ||
+    (l.enviadoPor||'').toLowerCase().includes(srch)
   );
-  if(respF) sessions = sessions.filter(s=>s.enviadoPor===respF);
 
-  // Stats
-  const allFiltered = sessions.flatMap(s=>s.entries);
-  document.getElementById('hd-total-sessoes').textContent = sessions.length;
-  document.getElementById('hd-total-env').textContent = allFiltered.filter(l=>l.status==='enviado').length;
-  document.getElementById('hd-total-err').textContent = allFiltered.filter(l=>l.status==='falha').length;
-  document.getElementById('hd-total-contatos').textContent = new Set(allFiltered.map(l=>l.tel)).size;
+  // Agrupar por DIA (dd/mm/yyyy)
+  const dayMap = {};
+  logsF.forEach(l => {
+    const day = (l.time||'').split(',')[0]?.trim() || '—';
+    if(!dayMap[day]) dayMap[day] = [];
+    dayMap[day].push(l);
+  });
+
+  // Ordenar dias do mais recente para o mais antigo
+  const days = Object.keys(dayMap).sort((a,b) => {
+    const pa = a.split('/'); const pb = b.split('/');
+    const da = new Date(`${pa[2]}-${pa[1]}-${pa[0]}`);
+    const db = new Date(`${pb[2]}-${pb[1]}-${pb[0]}`);
+    return db - da;
+  });
+
+  // Stats gerais
+  document.getElementById('hd-total-sessoes').textContent = days.length;
+  document.getElementById('hd-total-env').textContent = logsF.filter(l=>l.status==='enviado').length;
+  document.getElementById('hd-total-err').textContent = logsF.filter(l=>l.status==='falha').length;
+  document.getElementById('hd-total-contatos').textContent = new Set(logsF.map(l=>l.tel)).size;
 
   const wrap = document.getElementById('hd-list');
   if(!wrap) return;
 
-  if(!sessions.length) {
+  if(!days.length) {
     wrap.innerHTML=`<div class="empty-state"><span class="empty-icon">🗂️</span><p>Nenhum disparo encontrado</p><div style="font-size:12px;color:var(--t3);margin-top:6px">Os disparos aparecerão aqui após o primeiro envio</div></div>`;
     return;
   }
 
-  wrap.innerHTML = sessions.map(s => {
-    const total = s.entries.length;
-    const env = s.entries.filter(e=>e.status==='enviado').length;
-    const err = s.entries.filter(e=>e.status==='falha').length;
-    const taxa = total ? Math.round(env/total*100) : 0;
-    const isAg = s.entries[0]?.agId;
-    const icon = isAg ? '🗓️' : '🚀';
-    const tipoBadge = isAg
-      ? `<span class="badge badge-blue" style="font-size:10px">Agendamento</span>`
-      : `<span class="badge badge-green" style="font-size:10px">Disparo Manual</span>`;
+  wrap.innerHTML = days.map(day => {
+    const entries = dayMap[day];
+    const total = entries.length;
+    const env   = entries.filter(e=>e.status==='enviado').length;
+    const err   = entries.filter(e=>e.status==='falha').length;
+    const taxa  = total ? Math.round(env/total*100) : 0;
+    const dayId = 'hd-day-' + day.replace(/\//g,'-');
 
-    return `<div class="card" style="margin-bottom:12px;padding:0;overflow:hidden">
-      <!-- Cabeçalho da sessão -->
-      <div style="padding:16px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-bottom:1px solid var(--bd2)">
-        <div style="width:40px;height:40px;border-radius:10px;background:var(--glow);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${icon}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:14px;font-weight:700;color:var(--t);margin-bottom:3px">${esc(s.listaNome)}</div>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            ${tipoBadge}
-            <span style="font-size:11px;color:var(--t3);font-family:var(--mono)">🕐 ${esc(s.startedAt)}</span>
-            ${s.enviadoPor&&s.enviadoPor!=='—'?`<span style="font-size:11px;color:var(--blue);font-weight:600">👤 ${esc(s.enviadoPor)}</span>`:''}
+    // Responsáveis únicos neste dia
+    const resps = [...new Set(entries.map(e=>e.enviadoPor||e._owner||'').filter(Boolean))];
+
+    // Horário do primeiro e último envio
+    const times = entries.map(e=>(e.time||'').split(', ')[1]?.slice(0,5)).filter(Boolean).sort();
+    const timeRange = times.length ? `${times[0]} – ${times[times.length-1]}` : '';
+
+    return `<div class="card" style="margin-bottom:10px;padding:0;overflow:hidden">
+      <!-- Linha principal do dia -->
+      <div style="padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <!-- Ícone + data -->
+        <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:180px">
+          <div style="width:42px;height:42px;border-radius:10px;background:var(--glow);display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0">
+            <div style="font-size:15px;font-weight:800;font-family:var(--mono);color:var(--g);line-height:1">${day.split('/')[0]}</div>
+            <div style="font-size:9px;color:var(--t3);font-family:var(--mono);text-transform:uppercase">${['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(day.split('/')[1])-1]||''}</div>
+          </div>
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--t)">${day}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:3px">
+              ${timeRange ? `<span style="font-size:11px;color:var(--t3);font-family:var(--mono)">🕐 ${timeRange}</span>` : ''}
+              ${resps.map(r=>`<span style="font-size:11px;color:var(--blue);font-weight:600">👤 ${esc(r.split(' ')[0])}</span>`).join('')}
+            </div>
           </div>
         </div>
-        <!-- Stats inline -->
-        <div style="display:flex;gap:12px;align-items:center;flex-shrink:0;flex-wrap:wrap">
-          <div style="text-align:center">
-            <div style="font-size:18px;font-weight:800;color:var(--g);font-family:var(--mono)">${env}</div>
+
+        <!-- Contadores -->
+        <div style="display:flex;gap:16px;align-items:center;flex-shrink:0">
+          <div style="text-align:center;min-width:44px">
+            <div style="font-size:20px;font-weight:800;color:var(--g);font-family:var(--mono)">${env}</div>
             <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">Enviados</div>
           </div>
-          <div style="text-align:center">
-            <div style="font-size:18px;font-weight:800;color:var(--red);font-family:var(--mono)">${err}</div>
+          <div style="text-align:center;min-width:44px">
+            <div style="font-size:20px;font-weight:800;color:var(--red);font-family:var(--mono)">${err}</div>
             <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">Falhas</div>
           </div>
-          <div style="text-align:center">
-            <div style="font-size:18px;font-weight:800;color:var(--t);font-family:var(--mono)">${total}</div>
+          <div style="text-align:center;min-width:44px">
+            <div style="font-size:20px;font-weight:800;color:var(--t2);font-family:var(--mono)">${total}</div>
             <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">Total</div>
           </div>
-          <div style="width:48px;height:48px;flex-shrink:0">
-            <svg viewBox="0 0 36 36" style="transform:rotate(-90deg)">
+          <!-- Taxa circular -->
+          <div style="position:relative;width:44px;height:44px;flex-shrink:0">
+            <svg viewBox="0 0 36 36" style="transform:rotate(-90deg);width:44px;height:44px">
               <circle cx="18" cy="18" r="15" fill="none" stroke="var(--s3)" stroke-width="3"/>
-              <circle cx="18" cy="18" r="15" fill="none" stroke="${taxa>70?'var(--g)':taxa>40?'var(--amber)':'var(--red)'}" stroke-width="3"
-                stroke-dasharray="${taxa*0.942} 94.2" stroke-linecap="round"/>
+              <circle cx="18" cy="18" r="15" fill="none"
+                stroke="${taxa>=70?'var(--g)':taxa>=40?'var(--amber)':'var(--red)'}"
+                stroke-width="3" stroke-dasharray="${(taxa*0.942).toFixed(1)} 94.2" stroke-linecap="round"/>
             </svg>
-            <div style="margin-top:-40px;text-align:center;font-size:10px;font-weight:700;font-family:var(--mono);color:${taxa>70?'var(--g)':taxa>40?'var(--amber)':'var(--red)'}">${taxa}%</div>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;font-family:var(--mono);color:${taxa>=70?'var(--g)':taxa>=40?'var(--amber)':'var(--red)'}">${taxa}%</div>
           </div>
         </div>
+
         <!-- Botão Ver mais -->
-        <button class="btn btn-sm" onclick="toggleHDSection('hd-body-${esc(s.id)}')" style="flex-shrink:0">
+        <button class="btn btn-sm" onclick="toggleHDSection('${dayId}')" style="flex-shrink:0">
           👁 Ver mais
         </button>
       </div>
-      <!-- Barra de progresso taxa -->
+
+      <!-- Barra de progresso -->
       <div style="height:3px;background:var(--s3)">
-        <div style="height:3px;width:${taxa}%;background:${taxa>70?'var(--g)':taxa>40?'var(--amber)':'var(--red)'};transition:width .4s"></div>
+        <div style="height:3px;width:${taxa}%;background:${taxa>=70?'var(--g)':taxa>=40?'var(--amber)':'var(--red)'};transition:width .5s"></div>
       </div>
-      <!-- Detalhes colapsáveis -->
-      <div id="hd-body-${esc(s.id)}" style="display:none;padding:0">
+
+      <!-- Detalhe colapsável — igual ao Relatório -->
+      <div id="${dayId}" style="display:none">
+        <div style="padding:10px 16px 6px;display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--bd2);background:var(--s2)">
+          <span style="font-size:11px;color:var(--t3);align-self:center">📋 ${total} registro(s)</span>
+          <button class="btn btn-xs" style="margin-left:auto" onclick="expDia('${day}')">⬇ Exportar dia</button>
+        </div>
         <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse">
             <thead>
@@ -4118,67 +4137,68 @@ function renderHistoricoDisparos() {
                 <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Nome</th>
                 <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono);white-space:nowrap">Telefone</th>
                 <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Empresa</th>
+                <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Enviado por</th>
                 <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Status</th>
                 <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Mensagem</th>
+                <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Erro</th>
               </tr>
             </thead>
             <tbody>
-              ${s.entries.map(e=>`<tr style="border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s" onmouseover="this.style.background='var(--glow2)'" onmouseout="this.style.background=''">
+              ${entries.sort((a,b)=>(b.time||'').localeCompare(a.time||'')).map(e=>`
+              <tr style="border-bottom:1px solid rgba(255,255,255,.04)" onmouseover="this.style.background='var(--glow2)'" onmouseout="this.style.background=''">
                 <td style="padding:9px 14px;font-size:11px;color:var(--t3);font-family:var(--mono);white-space:nowrap">${esc(e.time)}</td>
                 <td style="padding:9px 14px;font-size:13px;font-weight:600">${esc(e.nome||'—')}</td>
                 <td style="padding:9px 14px;font-size:12px;font-family:var(--mono);white-space:nowrap">${esc(fmt(e.tel))}</td>
                 <td style="padding:9px 14px;font-size:12px;color:var(--t3)">${esc(e.empresa||'—')}</td>
                 <td style="padding:9px 14px">
+                  ${(e.enviadoPor||e._owner)
+                    ? `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--blue)">
+                        <span style="width:20px;height:20px;border-radius:5px;background:rgba(64,196,255,.12);display:inline-flex;align-items:center;justify-content:center;font-size:9px">${esc((e.enviadoPor||e._owner||'').split(' ')[0].slice(0,2).toUpperCase())}</span>
+                        ${esc((e.enviadoPor||e._owner||'').split(' ')[0])}
+                       </span>`
+                    : '<span style="color:var(--t3);font-size:11px">—</span>'}
+                </td>
+                <td style="padding:9px 14px">
                   ${e.status==='enviado'
                     ? '<span class="badge badge-green">✓ Enviado</span>'
-                    : `<span class="badge badge-red" title="${esc(e.erro||'')}">✗ Falha</span>`}
+                    : `<span class="badge badge-red">✗ Falha</span>`}
                 </td>
-                <td style="padding:9px 14px;font-size:11px;color:var(--t3);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.msg||'')}">${esc(e.msg||'—')}</td>
+                <td style="padding:9px 14px;font-size:11px;color:var(--t3);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.msg||'')}">${esc(e.msg||'—')}</td>
+                <td style="padding:9px 14px;font-size:11px;max-width:160px">
+                  ${e.erro
+                    ? `<span class="badge badge-amber" style="font-size:10px;cursor:help" title="${esc(e.erro)}">⚠ ${esc(e.erro.length>25?e.erro.slice(0,25)+'...':e.erro)}</span>`
+                    : '<span style="color:var(--t3)">—</span>'}
+                </td>
               </tr>`).join('')}
             </tbody>
           </table>
-        </div>
-        <div style="padding:10px 20px;display:flex;justify-content:flex-end;border-top:1px solid var(--bd2)">
-          <button class="btn btn-xs" onclick="expSessao('${esc(s.id)}')">⬇ Exportar esta sessão</button>
         </div>
       </div>
     </div>`;
   }).join('');
 }
 
-function toggleHDSection(id) {
-  const el = document.getElementById(id);
-  if(!el) return;
-  const isOpen = el.style.display !== 'none';
-  el.style.display = isOpen ? 'none' : 'block';
-  // Scroll suave
-  if(!isOpen) setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
-}
-
-function expSessao(sessionId) {
-  const sessionMap = {};
-  logs.forEach(l => {
-    const sid = l.sessionId || ('solo_'+l.id);
-    if(!sessionMap[sid]) sessionMap[sid] = {listaNome: l.listaNome||'Disparo', entries:[]};
-    sessionMap[sid].entries.push(l);
-  });
-  const s = sessionMap[sessionId];
-  if(!s) return;
-  const csv = 'Data/Hora,Nome,Telefone,Empresa,Status,Mensagem,Erro\n' +
-    s.entries.map(e=>[e.time,e.nome,fmt(e.tel),e.empresa||'',e.status,(e.msg||'').replace(/,/g,';'),(e.erro||'').replace(/,/g,';')].join(',')).join('\n');
+function expDia(day) {
+  const isMaster = currentUser?.master;
+  const srcLogs = isMaster ? allLogs : logs;
+  const entries = srcLogs.filter(l=>(l.time||'').startsWith(day));
+  if(!entries.length){ toast('Sem logs neste dia','warn'); return; }
+  const csv = 'Data/Hora,Nome,Telefone,Empresa,Enviado Por,Status,Mensagem,Erro\n' +
+    entries.map(e=>[e.time,e.nome,fmt(e.tel),e.empresa||'',e.enviadoPor||e._owner||'',e.status,(e.msg||'').replace(/,/g,';'),(e.erro||'').replace(/,/g,';')].join(',')).join('\n');
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
-  a.download=`disparo_${(s.listaNome||'sessao').replace(/\s/g,'_')}.csv`;
+  a.download=`disparos_${day.replace(/\//g,'-')}.csv`;
   a.click();
 }
 
 function expHistoricoDisparos() {
-  const csv = 'Sessão,Lista,Data/Hora,Nome,Telefone,Empresa,Status,Enviado Por,Mensagem,Erro\n' +
-    logs.map(l=>[
-      l.sessionId||l.id,
-      l.listaNome||'—',
-      l.time,l.nome,fmt(l.tel),l.empresa||'',
-      l.status,l.enviadoPor||'',
+  const isMaster = currentUser?.master;
+  const srcLogs = isMaster ? allLogs : logs;
+  const csv = 'Data/Hora,Nome,Telefone,Empresa,Enviado Por,Status,Mensagem,Erro\n' +
+    srcLogs.map(l=>[
+      l.time, l.nome, fmt(l.tel), l.empresa||'',
+      l.enviadoPor||l._owner||'',
+      l.status,
       (l.msg||'').replace(/,/g,';'),
       (l.erro||'').replace(/,/g,';')
     ].join(',')).join('\n');
