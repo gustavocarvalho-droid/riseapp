@@ -743,6 +743,9 @@ input[type=range]::-moz-range-thumb{
     <div class="nav-item" id="mn-relatorio" onclick="go('relatorio')">
       <span class="nav-icon">📈</span>Relatório
     </div>
+    <div class="nav-item" id="mn-historicodisparos" onclick="go('historicodisparos')">
+      <span class="nav-icon">🗂️</span>Histórico de Disparos
+    </div>
     <div class="nav-section">Sistema</div>
     <div class="nav-item" id="mn-numero" onclick="go('numero')">
       <span class="nav-icon">📱</span>Meu Número
@@ -841,6 +844,14 @@ input[type=range]::-moz-range-thumb{
             <option value="Giulia B.">Giulia B.</option>
             <option value="Larissa P.">Larissa P.</option>
           </select>
+          <select id="ct-disparo" style="width:auto;min-width:160px" onchange="renderC()">
+            <option value="">Todos disparos</option>
+            <option value="hoje">Disparado hoje</option>
+            <option value="ontem">Disparado ontem</option>
+            <option value="semana">Últimos 7 dias</option>
+            <option value="mes">Este mês</option>
+            <option value="nunca">Nunca disparado</option>
+          </select>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
           <button class="btn btn-sm" onclick="selTodos()">☑ Todos</button>
@@ -861,6 +872,7 @@ input[type=range]::-moz-range-thumb{
                 <th>Lista</th>
                 <th>Responsável</th>
                 <th>Status</th>
+                <th>Disparado em</th>
                 <th>CRM</th>
                 <th>Ações</th>
               </tr>
@@ -1199,7 +1211,10 @@ input[type=range]::-moz-range-thumb{
         <div style="font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
           <span style="width:28px;height:28px;border-radius:7px;background:rgba(255,171,64,.1);display:flex;align-items:center;justify-content:center;font-size:14px">📅</span>
           Agendamentos Ativos
-          <button class="btn btn-xs btn-danger" style="margin-left:auto" onclick="limparAgendamentos()">🗑 Limpar</button>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button class="btn btn-xs btn-blue" onclick="verArquivados()">📦 Arquivados</button>
+            <button class="btn btn-xs btn-danger" onclick="limparAgendamentos()">🗑 Limpar</button>
+          </div>
         </div>
         <div id="ag-list">
           <div class="empty-state"><span class="empty-icon">🗓️</span><p>Nenhum agendamento criado</p></div>
@@ -1303,6 +1318,42 @@ input[type=range]::-moz-range-thumb{
       </div>
     </div>
 
+    <!-- ══════════ HISTÓRICO DE DISPAROS ══════════ -->
+    <div class="panel" id="panel-historicodisparos">
+      <div class="grid4 mb-4">
+        <div class="stat-card stat-green">
+          <div class="stat-num" id="hd-total-sessoes">0</div>
+          <div class="stat-label">Sessões</div>
+        </div>
+        <div class="stat-card stat-green">
+          <div class="stat-num" id="hd-total-env">0</div>
+          <div class="stat-label">Enviados</div>
+        </div>
+        <div class="stat-card stat-red">
+          <div class="stat-num" id="hd-total-err">0</div>
+          <div class="stat-label">Falhas</div>
+        </div>
+        <div class="stat-card stat-blue">
+          <div class="stat-num" id="hd-total-contatos">0</div>
+          <div class="stat-label">Contatos únicos</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+        <div class="search-bar" style="flex:1;min-width:200px;margin-bottom:0">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="hd-search" placeholder="Buscar por lista, responsável..." oninput="renderHistoricoDisparos()">
+        </div>
+        <select id="hd-resp-filter" style="width:auto;min-width:160px" onchange="renderHistoricoDisparos()">
+          <option value="">Todos responsáveis</option>
+          <option value="Gustavo C.">Gustavo C.</option>
+          <option value="Giulia B.">Giulia B.</option>
+          <option value="Larissa P.">Larissa P.</option>
+        </select>
+        <button class="btn btn-sm" onclick="expHistoricoDisparos()">⬇ Exportar CSV</button>
+      </div>
+      <div id="hd-list"></div>
+    </div>
+
     <!-- ══════════ NÚMERO ══════════ -->
     <div class="panel" id="panel-numero">
       <div class="grid2">
@@ -1398,6 +1449,7 @@ const TABS = {
   listas:   ['Listas','Organize contatos em grupos'],
   crm:      ['CRM','Acompanhe o funil de vendas'],
   relatorio:['Relatório','Histórico de envios'],
+  historicodisparos:['Histórico de Disparos','Disparos realizados agrupados por sessão'],
   numero:   ['Meu Número','Status e QR Code'],
   config:   ['Configurações','API e configurações do sistema'],
 };
@@ -1434,6 +1486,7 @@ let filaIdx = 0;
 let chatContact = null;
 let chatLogs = {};
 let inboxContacts = [];
+let currentFireSession = null;
 let chatTab = 'historico'; // historico | novos | todos
 
 function setChatTab(tab) {
@@ -1505,6 +1558,7 @@ function go(tab) {
   if(tab==='disparo') { updDisparo(); populateFireTpls(); updFirePrev(); setTimeout(()=>syncFireSliders(),50); }
   if(tab==='crm') renderCRM();
   if(tab==='relatorio') renderLogs();
+  if(tab==='historicodisparos') renderHistoricoDisparos();
   if(tab==='conversa') { renderChatList(); preloadRecentChats(); }
   if(tab==='agendamento') { renderAgendamentos(); populateAgTpls(); updAgPrev(); setTimeout(()=>syncAgSliders(),50); }
   if(tab==='config') renderConfig();
@@ -1701,8 +1755,34 @@ function renderC() {
   const cid = document.getElementById('ct-cidade')?.value||'';
   const lst = document.getElementById('ct-lista')?.value||'';
   const resp = document.getElementById('ct-resp')?.value||'';
+  const disparoF = document.getElementById('ct-disparo')?.value||'';
 
   const listaIds = lst ? (listas.find(l=>String(l.id)===lst)||{contatos:[]}).contatos : null;
+
+  // Mapa de último disparo por tel
+  const lastDisparoMap = {};
+  logs.forEach(l => {
+    const tel = (l.tel||'').replace(/\D/g,'');
+    if(!lastDisparoMap[tel] || l.time > lastDisparoMap[tel]) {
+      lastDisparoMap[tel] = l.time;
+    }
+  });
+
+  // Helper de datas para filtro de disparo
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday); startOfYesterday.setDate(startOfYesterday.getDate()-1);
+  const startOfWeek = new Date(startOfToday); startOfWeek.setDate(startOfWeek.getDate()-6);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  function parseLogDate(str) {
+    // format: "DD/MM/YYYY, HH:MM:SS"
+    if(!str) return null;
+    const [datePart, timePart] = str.split(', ');
+    if(!datePart) return null;
+    const [d,m,y] = datePart.split('/');
+    return new Date(`${y}-${m}-${d}T${timePart||'00:00:00'}`);
+  }
 
   let filtered = contacts.filter(c=>{
     if(srch && !`${c.nome||''} ${c.empresa||''} ${c.tel||''}`.toLowerCase().includes(srch)) return false;
@@ -1710,6 +1790,17 @@ function renderC() {
     if(cid && c.cidade!==cid) return false;
     if(resp && c.responsavel!==resp) return false;
     if(listaIds && !listaIds.some(lid=>String(lid)===String(c.id))) return false;
+    if(disparoF) {
+      const tel = (c.tel||'').replace(/\D/g,'');
+      const lastStr = lastDisparoMap[tel] || lastDisparoMap[tel.replace(/^55/,'')] || lastDisparoMap['55'+tel];
+      const lastDate = parseLogDate(lastStr);
+      if(disparoF === 'nunca') { if(lastDate) return false; }
+      else if(!lastDate) return false;
+      else if(disparoF === 'hoje' && lastDate < startOfToday) return false;
+      else if(disparoF === 'ontem' && (lastDate < startOfYesterday || lastDate >= startOfToday)) return false;
+      else if(disparoF === 'semana' && lastDate < startOfWeek) return false;
+      else if(disparoF === 'mes' && lastDate < startOfMonth) return false;
+    }
     return true;
   });
 
@@ -1760,6 +1851,15 @@ function renderC() {
           return `<span class="badge ${cls2}" style="font-size:10px">${esc(label)}</span>`;
         })()
       : `<span style="font-size:11px;color:var(--t3)">Não inserido</span>`;
+
+    // Disparado em
+    const tel = (c.tel||'').replace(/\D/g,'');
+    const lastDisp = lastDisparoMap[tel] || lastDisparoMap[tel.replace(/^55/,'')] || lastDisparoMap['55'+tel];
+    const dispadoCell = lastDisp
+      ? `<div style="font-size:11px;color:var(--t2);font-family:var(--mono);white-space:nowrap">${esc(lastDisp.split(',')[0])}</div>
+         <div style="font-size:10px;color:var(--t3);font-family:var(--mono)">${esc((lastDisp.split(',')[1]||'').trim().slice(0,5))}</div>`
+      : `<span style="font-size:11px;color:var(--t3)">—</span>`;
+
     return `<tr>
       <td><input type="checkbox" class="c-chk" style="width:auto;cursor:pointer" data-id="${c.id}" onchange="updSel()"></td>
       <td>
@@ -1783,6 +1883,7 @@ function renderC() {
         }
       </td>
       <td>${st_badge}</td>
+      <td>${dispadoCell}</td>
       <td>${crmBadge}</td>
       <td>
         <div style="display:flex;gap:4px">
@@ -1792,7 +1893,7 @@ function renderC() {
         </div>
       </td>
     </tr>`;
-  }).join('') || `<tr><td colspan="9"><div class="empty-state"><span class="empty-icon">👥</span><p>Nenhum contato encontrado</p></div></td></tr>`;
+  }).join('') || `<tr><td colspan="10"><div class="empty-state"><span class="empty-icon">👥</span><p>Nenhum contato encontrado</p></div></td></tr>`;
 
   // Pager
   const pager = document.getElementById('ct-pager');
@@ -2351,6 +2452,11 @@ function startFire() {
   const fireList = fireQty > 0 ? list.slice(0, fireQty) : list;
   fila = fireList.map(c=>c.id);
   filaIdx = 0; fireActive = true;
+  // Gerar ID único para esta sessão de disparo
+  const tgt = document.getElementById('fire-target')?.value||'all';
+  const listaId = tgt==='lista' ? (document.getElementById('fire-lista-sel')?.value||null) : null;
+  const listaNome = listaId ? (listas.find(l=>String(l.id)===listaId)?.nome||'Lista') : 'Todos pendentes';
+  currentFireSession = { id: uid(), listaId, listaNome, startedAt: new Date().toLocaleString('pt-BR'), total: fireList.length };
   document.getElementById('fire-btn').disabled = true;
   document.getElementById('fire-banner').style.display='block';
   updFireUI();
@@ -2444,7 +2550,10 @@ async function fireNext() {
     status:sucesso?'enviado':'falha',
     msg:text.slice(0,60),
     enviadoPor:currentUser?.name||'',
-    erro:erroMotivo||''
+    erro:erroMotivo||'',
+    sessionId: currentFireSession?.id||null,
+    listaNome: currentFireSession?.listaNome||'Manual',
+    sessionStartedAt: currentFireSession?.startedAt||ts
   };
   logs.unshift(logEntry);
 
@@ -2608,6 +2717,166 @@ function arquivarAg(id) {
   salvarDados(); renderAgendamentos(); updBadges();
   toast('Agendamento arquivado');
 }
+
+function verArquivados() {
+  const arquivados = agendamentos.filter(a => a.status === 'archived' || a.arquivado);
+  if(!arquivados.length) {
+    showModal(`
+      <div class="modal-title">📦 Agendamentos Arquivados</div>
+      <div style="text-align:center;padding:28px 0;color:var(--t3)">
+        <div style="font-size:36px;margin-bottom:10px">📭</div>
+        <p style="font-size:13px">Nenhum agendamento arquivado ainda.</p>
+        <p style="font-size:11px;margin-top:6px;color:var(--t3)">Agendamentos concluídos ou cancelados podem ser arquivados.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-sm" onclick="closeModal()">Fechar</button>
+      </div>
+    `);
+    return;
+  }
+
+  const rows = arquivados.sort((a,b)=>b.ts-a.ts).map(ag => {
+    const dt = new Date(ag.ts);
+    const env = (ag.historico||[]).filter(l=>l.status==='enviado').length;
+    const err = (ag.historico||[]).filter(l=>l.status==='falha').length;
+    const total = (ag.historico||[]).length;
+    const statusOrig = ag.status==='done' ? '<span class="badge badge-green" style="font-size:10px">✓ Concluído</span>'
+      : ag.status==='cancelled' ? '<span class="badge badge-red" style="font-size:10px">Cancelado</span>'
+      : '<span class="badge badge-dim" style="font-size:10px">Arquivado</span>';
+    return `
+      <div style="padding:12px 0;border-bottom:1px solid var(--bd2);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:160px">
+          <div style="font-size:13px;font-weight:600;color:var(--t);margin-bottom:3px">${esc(ag.nome)}</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            ${statusOrig}
+            <span style="font-size:11px;color:var(--t3);font-family:var(--mono)">🕐 ${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
+          </div>
+          <div style="font-size:11px;color:var(--t3);margin-top:3px">
+            ${ag.target==='lista'?`📋 Lista: ${esc(listas.find(l=>l.id==ag.listaId)?.nome||'—')}`:'👥 Todos pendentes'}
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-shrink:0">
+          ${total > 0 ? `
+            <div style="text-align:center">
+              <div style="font-size:15px;font-weight:800;color:var(--g);font-family:var(--mono)">${env}</div>
+              <div style="font-size:9px;color:var(--t3);text-transform:uppercase">Env</div>
+            </div>
+            <div style="text-align:center">
+              <div style="font-size:15px;font-weight:800;color:var(--red);font-family:var(--mono)">${err}</div>
+              <div style="font-size:9px;color:var(--t3);text-transform:uppercase">Falha</div>
+            </div>
+            <div style="text-align:center">
+              <div style="font-size:15px;font-weight:800;color:var(--t);font-family:var(--mono)">${total}</div>
+              <div style="font-size:9px;color:var(--t3);text-transform:uppercase">Total</div>
+            </div>
+          ` : `<span style="font-size:11px;color:var(--t3)">Sem registros</span>`}
+          <div style="display:flex;gap:5px">
+            ${total > 0 ? `<button class="btn btn-xs btn-blue" onclick="closeModal();verHistoricoAg('${ag.id}')">📋 Ver</button>` : ''}
+            <button class="btn btn-xs btn-danger" onclick="_desarquivarOuExcluirAg('${ag.id}',this)" title="Excluir permanentemente">🗑</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  showModal(`
+    <div class="modal-title">📦 Agendamentos Arquivados</div>
+    <div class="modal-sub">${arquivados.length} agendamento(s) arquivado(s)</div>
+    <div style="max-height:420px;overflow-y:auto;margin:0 -4px;padding:0 4px">
+      ${rows}
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button class="btn btn-xs btn-danger" onclick="_limparTodosArquivados()">🗑 Excluir todos arquivados</button>
+      <button class="btn btn-sm" onclick="closeModal()">Fechar</button>
+    </div>
+  `);
+}
+
+function _desarquivarOuExcluirAg(id, btn) {
+  agendamentos = agendamentos.filter(a=>a.id!==id);
+  salvarDados(); updBadges();
+  // Reabrir modal atualizado
+  closeModal();
+  setTimeout(verArquivados, 50);
+  toast('Agendamento excluído');
+}
+
+function _limparTodosArquivados() {
+  const n = agendamentos.filter(a=>a.status==='archived'||a.arquivado).length;
+  agendamentos = agendamentos.filter(a=>a.status!=='archived'&&!a.arquivado);
+  salvarDados(); updBadges(); closeModal();
+  toast(`${n} agendamento(s) arquivado(s) excluído(s)`);
+}
+function verArquivados() {
+  const arquivados = agendamentos.filter(a=>a.status==='archived');
+  if(!arquivados.length) {
+    showModal(`
+      <div class="modal-title">📦 Agendamentos Arquivados</div>
+      <div class="empty-state" style="padding:32px 0">
+        <span class="empty-icon">📭</span>
+        <p>Nenhum agendamento arquivado</p>
+      </div>
+      <div class="modal-footer"><button class="btn btn-sm" onclick="closeModal()">Fechar</button></div>
+    `);
+    return;
+  }
+  const rows = arquivados.sort((a,b)=>b.ts-a.ts).map(ag=>{
+    const dt = new Date(ag.ts);
+    const env = (ag.historico||[]).filter(l=>l.status==='enviado').length;
+    const total = (ag.historico||[]).length;
+    const statusBadge = ag.status==='done'||ag.status==='archived'
+      ? `<span class="badge badge-green">✓ Concluído</span>`
+      : ag.status==='cancelled'
+      ? `<span class="badge badge-red">Cancelado</span>`
+      : `<span class="badge badge-dim">Arquivado</span>`;
+    return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--bd2)">
+      <div style="width:36px;height:36px;border-radius:9px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🗓️</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--t)">${esc(ag.nome)}</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:2px;font-family:var(--mono)">
+          ${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}
+          ${ag.target==='lista'?` • Lista: ${esc(listas.find(l=>l.id==ag.listaId)?.nome||'—')}`:''}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
+          ${statusBadge}
+          ${total?`<span style="font-size:11px;color:var(--t3)">📨 ${env}/${total} enviados</span>`:''}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">
+        <button class="btn btn-xs" onclick="verHistoricoAg('${ag.id}')">📋 Ver logs</button>
+        <button class="btn btn-xs btn-danger" onclick="_desarquivarOuExcluir('${ag.id}')">🗑 Excluir</button>
+      </div>
+    </div>`;
+  }).join('');
+  showModal(`
+    <div class="modal-title">📦 Agendamentos Arquivados</div>
+    <div class="modal-sub">${arquivados.length} agendamento(s) arquivado(s)</div>
+    <div style="max-height:420px;overflow-y:auto;margin-top:4px">${rows}</div>
+    <div class="modal-footer">
+      <button class="btn btn-sm btn-danger" onclick="_limparArquivados()">🗑 Limpar todos arquivados</button>
+      <button class="btn btn-sm" onclick="closeModal()">Fechar</button>
+    </div>
+  `);
+}
+function _desarquivarOuExcluir(id) {
+  showModal(`
+    <div class="modal-title">🗑 Excluir agendamento arquivado</div>
+    <p class="modal-sub">Esta ação é permanente.</p>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="verArquivados()">Cancelar</button>
+      <button class="btn btn-danger btn-sm" onclick="_doExcluirAg('${id}');verArquivados()">Excluir</button>
+    </div>
+  `);
+}
+function _limparArquivados() {
+  showModal(`
+    <div class="modal-title">⚠️ Limpar todos arquivados</div>
+    <p class="modal-sub">Remove permanentemente todos os agendamentos arquivados.</p>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="verArquivados()">Cancelar</button>
+      <button class="btn btn-danger btn-sm" onclick="agendamentos=agendamentos.filter(a=>a.status!=='archived');salvarDados();renderAgendamentos();updBadges();closeModal();toast('Arquivados removidos')">Confirmar</button>
+    </div>
+  `);
+}
 function limparAgendamentos() {
   showModal(`
     <div class="modal-title">🗑 Limpar agendamentos</div>
@@ -2671,12 +2940,12 @@ async function fireAgendamento(ag) {
       });
       const ct=contacts.find(x=>x.id===c.id);
       if(ct&&res.ok) ct.status='enviado';
-      const logEntry={id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60),enviadoPor:currentUser?.name||'',agId:ag.id};
+      const logEntry={id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60),enviadoPor:currentUser?.name||'',agId:ag.id,sessionId:ag.id,listaNome:ag.nome,sessionStartedAt:ag.data+' '+ag.hora};
       logs.unshift(logEntry);
       if(!ag.historico) ag.historico=[];
       ag.historico.push(logEntry);
     } catch(e){
-      const logEntry={id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:'',enviadoPor:currentUser?.name||'',agId:ag.id};
+      const logEntry={id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'falha',msg:'',enviadoPor:currentUser?.name||'',agId:ag.id,sessionId:ag.id,listaNome:ag.nome,sessionStartedAt:ag.data+' '+ag.hora};
       logs.unshift(logEntry);
       if(!ag.historico) ag.historico=[];
       ag.historico.push(logEntry);
@@ -3560,7 +3829,190 @@ function _doChangePwdSelf() {
   toast('Senha alterada com sucesso ✓');
 }
 
-// ── REENVIAR FALHAS ──
+// ── HISTÓRICO DE DISPAROS ──
+function renderHistoricoDisparos() {
+  const srch = (document.getElementById('hd-search')?.value||'').toLowerCase();
+  const respF = document.getElementById('hd-resp-filter')?.value||'';
+
+  // Agrupar logs por sessionId (ou agId como fallback)
+  const sessionMap = {};
+  logs.forEach(l => {
+    const sid = l.sessionId || ('solo_'+l.id);
+    if(!sessionMap[sid]) {
+      sessionMap[sid] = {
+        id: sid,
+        listaNome: l.listaNome || l.agId ? (agendamentos.find(a=>a.id===l.agId)?.nome||'Agendamento') : 'Disparo Manual',
+        startedAt: l.sessionStartedAt || l.time,
+        enviadoPor: l.enviadoPor||'—',
+        entries: []
+      };
+    }
+    sessionMap[sid].entries.push(l);
+  });
+
+  let sessions = Object.values(sessionMap).sort((a,b)=>{
+    // Ordenar pela data do log mais recente da sessão
+    const aT = a.entries[0]?.time||'';
+    const bT = b.entries[0]?.time||'';
+    return bT.localeCompare(aT);
+  });
+
+  // Filtros
+  if(srch) sessions = sessions.filter(s=>
+    s.listaNome.toLowerCase().includes(srch) ||
+    s.enviadoPor.toLowerCase().includes(srch)
+  );
+  if(respF) sessions = sessions.filter(s=>s.enviadoPor===respF);
+
+  // Stats
+  const allFiltered = sessions.flatMap(s=>s.entries);
+  document.getElementById('hd-total-sessoes').textContent = sessions.length;
+  document.getElementById('hd-total-env').textContent = allFiltered.filter(l=>l.status==='enviado').length;
+  document.getElementById('hd-total-err').textContent = allFiltered.filter(l=>l.status==='falha').length;
+  document.getElementById('hd-total-contatos').textContent = new Set(allFiltered.map(l=>l.tel)).size;
+
+  const wrap = document.getElementById('hd-list');
+  if(!wrap) return;
+
+  if(!sessions.length) {
+    wrap.innerHTML=`<div class="empty-state"><span class="empty-icon">🗂️</span><p>Nenhum disparo encontrado</p><div style="font-size:12px;color:var(--t3);margin-top:6px">Os disparos aparecerão aqui após o primeiro envio</div></div>`;
+    return;
+  }
+
+  wrap.innerHTML = sessions.map(s => {
+    const total = s.entries.length;
+    const env = s.entries.filter(e=>e.status==='enviado').length;
+    const err = s.entries.filter(e=>e.status==='falha').length;
+    const taxa = total ? Math.round(env/total*100) : 0;
+    const isAg = s.entries[0]?.agId;
+    const icon = isAg ? '🗓️' : '🚀';
+    const tipoBadge = isAg
+      ? `<span class="badge badge-blue" style="font-size:10px">Agendamento</span>`
+      : `<span class="badge badge-green" style="font-size:10px">Disparo Manual</span>`;
+
+    return `<div class="card" style="margin-bottom:12px;padding:0;overflow:hidden">
+      <!-- Cabeçalho da sessão -->
+      <div style="padding:16px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-bottom:1px solid var(--bd2)">
+        <div style="width:40px;height:40px;border-radius:10px;background:var(--glow);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${icon}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:700;color:var(--t);margin-bottom:3px">${esc(s.listaNome)}</div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            ${tipoBadge}
+            <span style="font-size:11px;color:var(--t3);font-family:var(--mono)">🕐 ${esc(s.startedAt)}</span>
+            ${s.enviadoPor&&s.enviadoPor!=='—'?`<span style="font-size:11px;color:var(--blue);font-weight:600">👤 ${esc(s.enviadoPor)}</span>`:''}
+          </div>
+        </div>
+        <!-- Stats inline -->
+        <div style="display:flex;gap:12px;align-items:center;flex-shrink:0;flex-wrap:wrap">
+          <div style="text-align:center">
+            <div style="font-size:18px;font-weight:800;color:var(--g);font-family:var(--mono)">${env}</div>
+            <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">Enviados</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:18px;font-weight:800;color:var(--red);font-family:var(--mono)">${err}</div>
+            <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">Falhas</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:18px;font-weight:800;color:var(--t);font-family:var(--mono)">${total}</div>
+            <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">Total</div>
+          </div>
+          <div style="width:48px;height:48px;flex-shrink:0">
+            <svg viewBox="0 0 36 36" style="transform:rotate(-90deg)">
+              <circle cx="18" cy="18" r="15" fill="none" stroke="var(--s3)" stroke-width="3"/>
+              <circle cx="18" cy="18" r="15" fill="none" stroke="${taxa>70?'var(--g)':taxa>40?'var(--amber)':'var(--red)'}" stroke-width="3"
+                stroke-dasharray="${taxa*0.942} 94.2" stroke-linecap="round"/>
+            </svg>
+            <div style="margin-top:-40px;text-align:center;font-size:10px;font-weight:700;font-family:var(--mono);color:${taxa>70?'var(--g)':taxa>40?'var(--amber)':'var(--red)'}">${taxa}%</div>
+          </div>
+        </div>
+        <!-- Botão Ver mais -->
+        <button class="btn btn-sm" onclick="toggleHDSection('hd-body-${esc(s.id)}')" style="flex-shrink:0">
+          👁 Ver mais
+        </button>
+      </div>
+      <!-- Barra de progresso taxa -->
+      <div style="height:3px;background:var(--s3)">
+        <div style="height:3px;width:${taxa}%;background:${taxa>70?'var(--g)':taxa>40?'var(--amber)':'var(--red)'};transition:width .4s"></div>
+      </div>
+      <!-- Detalhes colapsáveis -->
+      <div id="hd-body-${esc(s.id)}" style="display:none;padding:0">
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono);white-space:nowrap">Data/Hora</th>
+                <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Nome</th>
+                <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono);white-space:nowrap">Telefone</th>
+                <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Empresa</th>
+                <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Status</th>
+                <th style="padding:9px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--t3);background:var(--s2);border-bottom:1px solid var(--bd2);text-align:left;font-family:var(--mono)">Mensagem</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${s.entries.map(e=>`<tr style="border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s" onmouseover="this.style.background='var(--glow2)'" onmouseout="this.style.background=''">
+                <td style="padding:9px 14px;font-size:11px;color:var(--t3);font-family:var(--mono);white-space:nowrap">${esc(e.time)}</td>
+                <td style="padding:9px 14px;font-size:13px;font-weight:600">${esc(e.nome||'—')}</td>
+                <td style="padding:9px 14px;font-size:12px;font-family:var(--mono);white-space:nowrap">${esc(fmt(e.tel))}</td>
+                <td style="padding:9px 14px;font-size:12px;color:var(--t3)">${esc(e.empresa||'—')}</td>
+                <td style="padding:9px 14px">
+                  ${e.status==='enviado'
+                    ? '<span class="badge badge-green">✓ Enviado</span>'
+                    : `<span class="badge badge-red" title="${esc(e.erro||'')}">✗ Falha</span>`}
+                </td>
+                <td style="padding:9px 14px;font-size:11px;color:var(--t3);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.msg||'')}">${esc(e.msg||'—')}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div style="padding:10px 20px;display:flex;justify-content:flex-end;border-top:1px solid var(--bd2)">
+          <button class="btn btn-xs" onclick="expSessao('${esc(s.id)}')">⬇ Exportar esta sessão</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleHDSection(id) {
+  const el = document.getElementById(id);
+  if(!el) return;
+  const isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'block';
+  // Scroll suave
+  if(!isOpen) setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
+}
+
+function expSessao(sessionId) {
+  const sessionMap = {};
+  logs.forEach(l => {
+    const sid = l.sessionId || ('solo_'+l.id);
+    if(!sessionMap[sid]) sessionMap[sid] = {listaNome: l.listaNome||'Disparo', entries:[]};
+    sessionMap[sid].entries.push(l);
+  });
+  const s = sessionMap[sessionId];
+  if(!s) return;
+  const csv = 'Data/Hora,Nome,Telefone,Empresa,Status,Mensagem,Erro\n' +
+    s.entries.map(e=>[e.time,e.nome,fmt(e.tel),e.empresa||'',e.status,(e.msg||'').replace(/,/g,';'),(e.erro||'').replace(/,/g,';')].join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download=`disparo_${(s.listaNome||'sessao').replace(/\s/g,'_')}.csv`;
+  a.click();
+}
+
+function expHistoricoDisparos() {
+  const csv = 'Sessão,Lista,Data/Hora,Nome,Telefone,Empresa,Status,Enviado Por,Mensagem,Erro\n' +
+    logs.map(l=>[
+      l.sessionId||l.id,
+      l.listaNome||'—',
+      l.time,l.nome,fmt(l.tel),l.empresa||'',
+      l.status,l.enviadoPor||'',
+      (l.msg||'').replace(/,/g,';'),
+      (l.erro||'').replace(/,/g,';')
+    ].join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download='historico_disparos_rise.csv';
+  a.click();
+}
 function reenviarFalhas() {
   const falhas = contacts.filter(c=>c.status==='falha');
   if(!falhas.length){ toast('Nenhuma falha para reenviar','warn'); return; }
