@@ -1576,7 +1576,14 @@ function go(tab) {
     if(banner) banner.style.display = currentUser?.master ? 'flex' : 'none';
     renderLogs();
   }
-  if(tab==='historicodisparos') renderHistoricoDisparos();
+  if(tab==='historicodisparos') {
+    // Garantir que allLogs tem os logs do usuário atual
+    const ownName = currentUser?.name||'';
+    allLogs = allLogs.filter(l => l._owner && l._owner !== ownName);
+    logs.forEach(l => { if(!allLogs.find(x=>x.id===l.id)) allLogs.push({...l, _owner: ownName}); });
+    allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
+    renderHistoricoDisparos();
+  }
   if(tab==='conversa') { renderChatList(); preloadRecentChats(); }
   if(tab==='agendamento') { renderAgendamentos(); populateAgTpls(); updAgPrev(); setTimeout(()=>syncAgSliders(),50); }
   if(tab==='config') renderConfig();
@@ -4010,7 +4017,10 @@ function renderHistoricoDisparos() {
 
   // Fonte de logs: master vê tudo, outros só os seus
   const isMaster = currentUser?.master;
-  const srcLogs = isMaster ? allLogs : logs;
+  // Para não-master: usar logs diretamente. Para master: allLogs (com fallback para logs)
+  const srcLogs = isMaster
+    ? (allLogs.length ? allLogs : logs.map(l=>({...l, _owner: currentUser?.name||''})))
+    : logs;
 
   // Filtrar por responsável
   let logsF = respF ? srcLogs.filter(l=>(l.enviadoPor||l._owner||'')===respF) : srcLogs;
@@ -4026,17 +4036,24 @@ function renderHistoricoDisparos() {
   // Agrupar por DIA (dd/mm/yyyy)
   const dayMap = {};
   logsF.forEach(l => {
-    const day = (l.time||'').split(',')[0]?.trim() || '—';
+    // Suporta "dd/mm/yyyy, HH:MM:SS" e "dd/mm/yyyy HH:MM:SS"
+    const raw = l.time||'';
+    const day = raw.split(',')[0]?.split(' ')[0]?.trim() || raw.slice(0,10) || '—';
     if(!dayMap[day]) dayMap[day] = [];
     dayMap[day].push(l);
   });
 
   // Ordenar dias do mais recente para o mais antigo
   const days = Object.keys(dayMap).sort((a,b) => {
-    const pa = a.split('/'); const pb = b.split('/');
-    const da = new Date(`${pa[2]}-${pa[1]}-${pa[0]}`);
-    const db = new Date(`${pb[2]}-${pb[1]}-${pb[0]}`);
-    return db - da;
+    try {
+      const pa = a.split('/'); const pb = b.split('/');
+      if(pa.length===3 && pb.length===3) {
+        const da = new Date(`${pa[2]}-${pa[1]}-${pa[0]}`);
+        const db = new Date(`${pb[2]}-${pb[1]}-${pb[0]}`);
+        if(!isNaN(da) && !isNaN(db)) return db - da;
+      }
+    } catch(e){}
+    return b.localeCompare(a);
   });
 
   // Stats gerais
