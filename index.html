@@ -1274,9 +1274,10 @@ input[type=range]::-moz-range-thumb{
 
     <!-- ══════════ RELATÓRIO ══════════ -->
     <div class="panel" id="panel-relatorio">
-      <div id="rlog-master-banner" style="display:none;background:rgba(0,230,118,.07);border:1px solid var(--bd);border-radius:10px;padding:10px 16px;margin-bottom:14px;font-size:12px;color:var(--g);display:flex;align-items:center;gap:8px">
+      <div id="rlog-master-banner" style="display:none;background:rgba(0,230,118,.07);border:1px solid var(--bd);border-radius:10px;padding:10px 16px;margin-bottom:14px;font-size:12px;color:var(--g);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:16px">🔑</span>
-        <span><b>Modo Master</b> — você está vendo os logs de <b>todos os usuários</b>. Use o filtro à direita para ver por usuário.</span>
+        <span style="flex:1"><b>Modo Master</b> — você está vendo os logs de <b>todos os usuários</b>. Use o filtro à direita para ver por usuário.</span>
+        <button id="btn-migrar-shared" class="btn btn-xs btn-amber" onclick="migrarDoShared()">🔄 Importar dados antigos (shared)</button>
       </div>
       <div class="grid4 mb-4">
         <div class="stat-card stat-green">
@@ -1713,43 +1714,46 @@ async function _saveNeon() {
 async function carregarDados() {
   const userKey = currentUser?.key || 'shared';
   try {
-    // 1. Tentar carregar dados do usuário
+    // 1. Carregar dados do usuário
     const res = await fetch('/api/dados', { headers:{'x-user-key': userKey} });
     let d = res.ok ? await res.json() : null;
+    if(!d) d = {};
 
-    // 2. MIGRAÇÃO: se não tem dados próprios, buscar do 'shared' (versão anterior)
-    const temDados = d && (d.contacts?.length || d.logs?.length || d.listas?.length);
-    if(!temDados) {
+    // 2. MIGRAÇÃO: se não tem LOGS (mesmo tendo contatos), buscar do 'shared'
+    const temLogs = d.logs?.length > 0;
+    if(!temLogs) {
       try {
         const resShared = await fetch('/api/dados', { headers:{'x-user-key':'shared'} });
         if(resShared.ok) {
           const shared = await resShared.json();
-          if(shared.contacts?.length || shared.logs?.length) {
-            d = shared;
-            // Salvar imediatamente na chave do usuário para não depender de shared de novo
+          if(shared.logs?.length) {
+            // Mesclar: usar contatos/listas próprios se existirem, logs do shared
+            d.logs = shared.logs;
+            d.contacts = d.contacts?.length ? d.contacts : (shared.contacts||[]);
+            d.listas = d.listas?.length ? d.listas : (shared.listas||[]);
+            d.crm = d.crm?.length ? d.crm : (shared.crm||[]);
+            d.agendamentos = d.agendamentos?.length ? d.agendamentos : (shared.agendamentos||[]);
+            d.savedmsg = d.savedmsg || shared.savedmsg || '';
+            d.config = d.config || shared.config || {};
+            d.chatLogs = d.chatLogs || shared.chatLogs || {};
+            d.crmCustomCols = d.crmCustomCols || shared.crmCustomCols || [];
+            // Salvar na chave do usuário
             await fetch('/api/dados', {
               method:'POST',
               headers:{'Content-Type':'application/json','x-user-key': userKey},
               body: JSON.stringify({
-                contacts: shared.contacts||[],
-                listas: shared.listas||[],
-                logs: shared.logs||[],
-                crm: shared.crm||[],
-                fila: shared.fila||[],
-                agendamentos: shared.agendamentos||[],
-                savedmsg: shared.savedmsg||'',
-                config: shared.config||{},
-                chatLogs: shared.chatLogs||{},
-                crmCustomCols: shared.crmCustomCols||[]
+                contacts: d.contacts, listas: d.listas, logs: d.logs,
+                crm: d.crm, fila: d.fila||[], agendamentos: d.agendamentos,
+                savedmsg: d.savedmsg, config: d.config,
+                chatLogs: d.chatLogs, crmCustomCols: d.crmCustomCols
               })
             });
-            toast('✅ Histórico restaurado com sucesso!');
+            toast('✅ Histórico de logs restaurado!');
           }
         }
       } catch(e){ console.warn('Migração shared falhou:', e); }
     }
 
-    if(!d) return;
     contacts = d.contacts||[];
     listas = d.listas||[];
     logs = d.logs||[];
@@ -1763,12 +1767,63 @@ async function carregarDados() {
     renderC(); renderListas(); updBadges(); renderAgendamentos();
     loadAllChats();
 
-    // Master: carregar logs de todos os usuários para o Relatório
     if(currentUser?.master) {
       await carregarLogsGlobais();
     }
   } catch(e) {
     console.warn('Load error:', e);
+  }
+}
+
+// Migração manual — força importar tudo do shared para o usuário atual
+async function migrarDoShared() {
+  const userKey = currentUser?.key || 'shared';
+  const btn = document.getElementById('btn-migrar-shared');
+  if(btn) { btn.disabled=true; btn.textContent='Importando...'; }
+  try {
+    const resShared = await fetch('/api/dados', { headers:{'x-user-key':'shared'} });
+    if(!resShared.ok) { toast('Dados shared não encontrados','warn'); return; }
+    const shared = await resShared.json();
+    if(!shared.logs?.length && !shared.contacts?.length) {
+      toast('Nenhum dado encontrado no shared','warn');
+      if(btn) { btn.disabled=false; btn.textContent='🔄 Importar dados antigos'; }
+      return;
+    }
+    // Mesclar: logs do shared + dados próprios atuais (contatos têm prioridade)
+    const mergedLogs = shared.logs||[];
+    const mergedContacts = contacts.length ? contacts : (shared.contacts||[]);
+    const mergedListas = listas.length ? listas : (shared.listas||[]);
+    const mergedCrm = crmData.length ? crmData : (shared.crm||[]);
+    const mergedAg = agendamentos.length ? agendamentos : (shared.agendamentos||[]);
+    const mergedMsg = savedMsg || shared.savedmsg || '';
+    const mergedTpls = tpls.length ? tpls : (shared.config?.tpls||[]);
+    const mergedChatLogs = Object.keys(chatLogs).length ? chatLogs : (shared.chatLogs||{});
+    const mergedCustomCols = crmCustomCols.length ? crmCustomCols : (shared.crmCustomCols||[]);
+
+    await fetch('/api/dados', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-user-key': userKey},
+      body: JSON.stringify({
+        contacts: mergedContacts, listas: mergedListas, logs: mergedLogs,
+        crm: mergedCrm, fila: fila, agendamentos: mergedAg,
+        savedmsg: mergedMsg, config: {tpls: mergedTpls},
+        chatLogs: mergedChatLogs, crmCustomCols: mergedCustomCols
+      })
+    });
+
+    // Atualizar estado local
+    contacts = mergedContacts; listas = mergedListas; logs = mergedLogs;
+    crmData = mergedCrm; agendamentos = mergedAg; savedMsg = mergedMsg;
+    tpls = mergedTpls; chatLogs = mergedChatLogs; crmCustomCols = mergedCustomCols;
+
+    renderC(); renderListas(); renderLogs(); renderCRM(); updBadges(); renderAgendamentos();
+    if(currentUser?.master) await carregarLogsGlobais();
+
+    toast(`✅ ${mergedLogs.length} logs e ${mergedContacts.length} contatos importados!`);
+    if(btn) btn.style.display='none';
+  } catch(e) {
+    toast('Erro na migração: '+e.message,'err');
+    if(btn) { btn.disabled=false; btn.textContent='🔄 Importar dados antigos'; }
   }
 }
 
