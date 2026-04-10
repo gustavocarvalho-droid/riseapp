@@ -1274,6 +1274,10 @@ input[type=range]::-moz-range-thumb{
 
     <!-- ══════════ RELATÓRIO ══════════ -->
     <div class="panel" id="panel-relatorio">
+      <div id="rlog-master-banner" style="display:none;background:rgba(0,230,118,.07);border:1px solid var(--bd);border-radius:10px;padding:10px 16px;margin-bottom:14px;font-size:12px;color:var(--g);display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px">🔑</span>
+        <span><b>Modo Master</b> — você está vendo os logs de <b>todos os usuários</b>. Use o filtro à direita para ver por usuário.</span>
+      </div>
       <div class="grid4 mb-4">
         <div class="stat-card stat-green">
           <div class="stat-num" id="rlog-env">0</div>
@@ -1294,10 +1298,18 @@ input[type=range]::-moz-range-thumb{
       </div>
       <div class="card">
         <div class="card-title"><span class="icon">📋</span>Log de Envios</div>
-        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-sm" onclick="expLogs()">⬇ Exportar CSV</button>
           <button class="btn btn-sm btn-amber" onclick="reenviarFalhas()">🔁 Reenviar falhas</button>
           <button class="btn btn-sm btn-danger" onclick="limparLogs()">🗑 Limpar logs</button>
+          <div id="rlog-resp-wrap" style="display:none;margin-left:auto">
+            <select id="rlog-resp-filter" style="width:auto;min-width:160px;font-size:12px" onchange="renderLogs()">
+              <option value="">👥 Todos os usuários</option>
+              <option value="Gustavo C.">Gustavo C.</option>
+              <option value="Giulia B.">Giulia B.</option>
+              <option value="Larissa P.">Larissa P.</option>
+            </select>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -1487,6 +1499,7 @@ let chatContact = null;
 let chatLogs = {};
 let inboxContacts = [];
 let currentFireSession = null;
+let allLogs = []; // todos os logs de todos os usuários (preenchido só para Master)
 let chatTab = 'historico'; // historico | novos | todos
 
 function setChatTab(tab) {
@@ -1557,7 +1570,11 @@ function go(tab) {
   if(tab==='mensagem') { loadTpl(); updPrev(); }
   if(tab==='disparo') { updDisparo(); populateFireTpls(); updFirePrev(); setTimeout(()=>syncFireSliders(),50); }
   if(tab==='crm') renderCRM();
-  if(tab==='relatorio') renderLogs();
+  if(tab==='relatorio') {
+    const banner = document.getElementById('rlog-master-banner');
+    if(banner) banner.style.display = currentUser?.master ? 'flex' : 'none';
+    renderLogs();
+  }
   if(tab==='historicodisparos') renderHistoricoDisparos();
   if(tab==='conversa') { renderChatList(); preloadRecentChats(); }
   if(tab==='agendamento') { renderAgendamentos(); populateAgTpls(); updAgPrev(); setTimeout(()=>syncAgSliders(),50); }
@@ -1672,10 +1689,19 @@ function salvarDados() {
 async function salvarImediato() { await _saveNeon(); }
 async function _saveNeon() {
   const ind = document.getElementById('save-indicator');
+  const userKey = currentUser?.key || 'shared';
+
+  // Sincronizar allLogs: substituir/adicionar os logs próprios
+  const ownName = currentUser?.name||'';
+  // Remove entradas próprias antigas do allLogs e reinsere atualizadas
+  allLogs = allLogs.filter(l => l._owner && l._owner !== ownName);
+  logs.forEach(l => { if(!allLogs.find(x=>x.id===l.id)) allLogs.push({...l, _owner: ownName}); });
+  allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
+
   try {
     const res = await fetch('/api/dados', {
       method:'POST',
-      headers:{'Content-Type':'application/json','x-user-key':'shared'},
+      headers:{'Content-Type':'application/json','x-user-key': userKey},
       body:JSON.stringify({contacts,listas,logs,crm:crmData,fila,agendamentos,savedmsg:savedMsg,config:{tpls},chatLogs,crmCustomCols})
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
@@ -1685,9 +1711,10 @@ async function _saveNeon() {
   }
 }
 async function carregarDados() {
+  const userKey = currentUser?.key || 'shared';
   try {
     const res = await fetch('/api/dados', {
-      headers:{'x-user-key':'shared'}
+      headers:{'x-user-key': userKey}
     });
     if(!res.ok) return;
     const d = await res.json();
@@ -1703,9 +1730,34 @@ async function carregarDados() {
     if(d.crmCustomCols) crmCustomCols = d.crmCustomCols;
     renderC(); renderListas(); updBadges(); renderAgendamentos();
     loadAllChats();
+
+    // Master: carregar logs de todos os usuários para o Relatório
+    if(currentUser?.master) {
+      await carregarLogsGlobais();
+    }
   } catch(e) {
     console.warn('Load error:', e);
   }
+}
+
+// Carrega logs de TODOS os usuários (apenas Master)
+async function carregarLogsGlobais() {
+  const users = getUsers();
+  const allUserKeys = Object.keys(users).filter(k => k !== currentUser.key);
+  for(const key of allUserKeys) {
+    try {
+      const res = await fetch('/api/dados', { headers:{'x-user-key': key} });
+      if(!res.ok) continue;
+      const d = await res.json();
+      const userLogs = (d.logs||[]).map(l=>({...l, _owner: users[key]?.name||key}));
+      // Merge: adicionar logs deste usuário que não existam nos logs atuais
+      userLogs.forEach(l=>{
+        if(!allLogs.find(x=>x.id===l.id)) allLogs.push(l);
+      });
+    } catch(e){}
+  }
+  // allLogs agora tem todos; ordenar por time desc
+  allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
 }
 
 // ── UTILS ──
@@ -3182,20 +3234,33 @@ function expCRM() {
 
 // ── LOGS ──
 function renderLogs() {
-  const logs_env=logs.filter(l=>l.status==='enviado').length;
-  const logs_err=logs.filter(l=>l.status==='falha').length;
+  // Master vê todos; outros veem apenas seus próprios
+  const isMaster = currentUser?.master;
+  const srcLogs = isMaster ? allLogs : logs;
+
+  // Filtro de responsável (só master vê)
+  const respF = document.getElementById('rlog-resp-filter')?.value||'';
+  const filtered = respF ? srcLogs.filter(l=>(l.enviadoPor||l._owner||'')===respF) : srcLogs;
+
+  const logs_env=filtered.filter(l=>l.status==='enviado').length;
+  const logs_err=filtered.filter(l=>l.status==='falha').length;
   document.getElementById('rlog-env').textContent=logs_env;
   document.getElementById('rlog-err').textContent=logs_err;
-  document.getElementById('rlog-total').textContent=logs.length;
-  document.getElementById('rlog-rate').textContent=logs.length?Math.round(logs_env/logs.length*100)+'%':'0%';
+  document.getElementById('rlog-total').textContent=filtered.length;
+  document.getElementById('rlog-rate').textContent=filtered.length?Math.round(logs_env/filtered.length*100)+'%':'0%';
+
+  // Mostrar/esconder filtro de responsável (só master)
+  const respWrap = document.getElementById('rlog-resp-wrap');
+  if(respWrap) respWrap.style.display = isMaster ? '' : 'none';
+
   const tbody=document.getElementById('log-tbody');
   if(!tbody) return;
-  tbody.innerHTML=logs.slice(0,200).map(l=>`<tr>
+  tbody.innerHTML=filtered.slice(0,200).map(l=>`<tr>
     <td style="font-family:var(--mono);font-size:11px;white-space:nowrap">${esc(l.time)}</td>
     <td>${esc(l.nome||'—')}</td>
     <td style="font-family:var(--mono);font-size:12px">${esc(fmt(l.tel))}</td>
-    <td>${l.enviadoPor
-      ? `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--blue)"><span style="width:20px;height:20px;border-radius:5px;background:rgba(64,196,255,.12);display:inline-flex;align-items:center;justify-content:center;font-size:9px">${esc(l.enviadoPor.split(' ')[0].slice(0,2).toUpperCase())}</span>${esc(l.enviadoPor.split(' ')[0])}</span>`
+    <td>${(l.enviadoPor||l._owner)
+      ? `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--blue)"><span style="width:20px;height:20px;border-radius:5px;background:rgba(64,196,255,.12);display:inline-flex;align-items:center;justify-content:center;font-size:9px">${esc((l.enviadoPor||l._owner||'').split(' ')[0].slice(0,2).toUpperCase())}</span>${esc((l.enviadoPor||l._owner||'').split(' ')[0])}</span>`
       : '<span style="color:var(--t3);font-size:11px">—</span>'
     }</td>
     <td>${l.status==='enviado'?'<span class="badge badge-green">✓ Enviado</span>':'<span class="badge badge-red">✗ Falha</span>'}</td>
@@ -3211,21 +3276,32 @@ function renderLogs() {
   </tr>`).join('')||'<tr><td colspan="7"><div class="empty-state"><span class="empty-icon">📋</span><p>Sem logs ainda</p></div></td></tr>';
 }
 function expLogs() {
+  const isMaster = currentUser?.master;
+  const srcLogs = isMaster ? allLogs : logs;
   const csv='Data,Nome,Telefone,Enviado Por,Status,Mensagem,Erro\n'+
-    logs.map(l=>[l.time,l.nome,fmt(l.tel),l.enviadoPor||'',l.status,(l.msg||'').replace(/,/g,';'),(l.erro||'').replace(/,/g,';')].join(',')).join('\n');
+    srcLogs.map(l=>[l.time,l.nome,fmt(l.tel),l.enviadoPor||l._owner||'',l.status,(l.msg||'').replace(/,/g,';'),(l.erro||'').replace(/,/g,';')].join(',')).join('\n');
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='logs_rise.csv'; a.click();
 }
 function limparLogs() {
+  const isMaster = currentUser?.master;
   showModal(`
     <div class="modal-title">🗑 Limpar logs</div>
-    <p class="modal-sub">Apagar todos os registros de envio?</p>
+    <p class="modal-sub">${isMaster ? 'Apagar apenas os seus próprios registros de envio?' : 'Apagar todos os registros de envio?'}</p>
     <div class="modal-footer">
       <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-danger btn-sm" onclick="logs=[];salvarDados();renderLogs();closeModal();toast('Logs apagados')">Confirmar</button>
+      <button class="btn btn-danger btn-sm" onclick="_doLimparLogs()">Confirmar</button>
     </div>
   `);
+}
+function _doLimparLogs() {
+  logs=[];
+  // Remover do allLogs os logs próprios
+  if(currentUser?.master) {
+    allLogs = allLogs.filter(l=>l._owner && l._owner !== currentUser.name);
+  }
+  salvarDados(); renderLogs(); closeModal(); toast('Logs apagados');
 }
 
 // ── NÚMERO ──
@@ -3343,16 +3419,21 @@ async function testConn() {
 async function testDB() {
   const s=document.getElementById('db-status');
   if(s) s.textContent='Testando...';
+  const userKey = currentUser?.key || 'shared';
   try {
-    const res=await fetch('/api/dados',{headers:{'x-user-key':'shared'}});
+    const res=await fetch('/api/dados',{headers:{'x-user-key': userKey}});
     if(res.ok){ if(s) s.innerHTML='<span style="color:var(--g)">✓ DB OK</span>'; toast('Banco OK ✓'); }
     else { if(s) s.innerHTML='<span style="color:var(--red)">✗ HTTP '+res.status+'</span>'; toast('Erro no DB','err'); }
   } catch(e){ if(s) s.innerHTML='<span style="color:var(--red)">✗ '+esc(e.message)+'</span>'; toast('Erro DB','err'); }
 }
 function wipeDB() {
+  const isMaster = currentUser?.master;
   showModal(`
-    <div class="modal-title">⚠️ Apagar todos os dados?</div>
+    <div class="modal-title">⚠️ Apagar ${isMaster?'dados de um usuário':'seus dados'}?</div>
     <p class="modal-sub">Esta ação é irreversível!</p>
+    ${isMaster ? `<div class="field"><label>Usuário</label><select id="wipe-user-sel">
+      ${Object.entries(getUsers()).map(([k,u])=>`<option value="${k}">${esc(u.name)}</option>`).join('')}
+    </select></div>` : ''}
     <div class="modal-footer">
       <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-danger btn-sm" onclick="_doWipe()">Confirmar apagar</button>
@@ -3360,11 +3441,17 @@ function wipeDB() {
   `);
 }
 async function _doWipe() {
+  const isMaster = currentUser?.master;
+  const targetKey = isMaster ? (document.getElementById('wipe-user-sel')?.value || currentUser.key) : currentUser.key;
   try {
-    await fetch('/api/dados',{method:'DELETE',headers:{'x-user-key':'shared'}});
-    contacts=[];listas=[];logs=[];crmData=[];fila=[];agendamentos=[];savedMsg='';
-    closeModal(); renderC(); renderListas(); renderCRM(); renderLogs(); updBadges();
-    toast('Dados apagados do banco');
+    await fetch('/api/dados',{method:'DELETE',headers:{'x-user-key': targetKey}});
+    if(targetKey === currentUser.key) {
+      contacts=[];listas=[];logs=[];crmData=[];fila=[];agendamentos=[];savedMsg='';
+      closeModal(); renderC(); renderListas(); renderCRM(); renderLogs(); updBadges();
+    } else {
+      closeModal();
+    }
+    toast(`Dados de "${getUsers()[targetKey]?.name||targetKey}" apagados`);
   } catch(e){ toast('Erro: '+e.message,'err'); closeModal(); }
 }
 function renderConfig() {
