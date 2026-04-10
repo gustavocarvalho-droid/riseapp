@@ -1713,11 +1713,43 @@ async function _saveNeon() {
 async function carregarDados() {
   const userKey = currentUser?.key || 'shared';
   try {
-    const res = await fetch('/api/dados', {
-      headers:{'x-user-key': userKey}
-    });
-    if(!res.ok) return;
-    const d = await res.json();
+    // 1. Tentar carregar dados do usuário
+    const res = await fetch('/api/dados', { headers:{'x-user-key': userKey} });
+    let d = res.ok ? await res.json() : null;
+
+    // 2. MIGRAÇÃO: se não tem dados próprios, buscar do 'shared' (versão anterior)
+    const temDados = d && (d.contacts?.length || d.logs?.length || d.listas?.length);
+    if(!temDados) {
+      try {
+        const resShared = await fetch('/api/dados', { headers:{'x-user-key':'shared'} });
+        if(resShared.ok) {
+          const shared = await resShared.json();
+          if(shared.contacts?.length || shared.logs?.length) {
+            d = shared;
+            // Salvar imediatamente na chave do usuário para não depender de shared de novo
+            await fetch('/api/dados', {
+              method:'POST',
+              headers:{'Content-Type':'application/json','x-user-key': userKey},
+              body: JSON.stringify({
+                contacts: shared.contacts||[],
+                listas: shared.listas||[],
+                logs: shared.logs||[],
+                crm: shared.crm||[],
+                fila: shared.fila||[],
+                agendamentos: shared.agendamentos||[],
+                savedmsg: shared.savedmsg||'',
+                config: shared.config||{},
+                chatLogs: shared.chatLogs||{},
+                crmCustomCols: shared.crmCustomCols||[]
+              })
+            });
+            toast('✅ Histórico restaurado com sucesso!');
+          }
+        }
+      } catch(e){ console.warn('Migração shared falhou:', e); }
+    }
+
+    if(!d) return;
     contacts = d.contacts||[];
     listas = d.listas||[];
     logs = d.logs||[];
