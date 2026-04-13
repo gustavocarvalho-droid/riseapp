@@ -1518,6 +1518,22 @@ function initials(name){ return (name||'?').split(' ').map(w=>w[0]).join('').toU
 function uid(){ return Date.now()+'_'+Math.random().toString(36).slice(2,7); }
 function tsNow(){ return new Date().toLocaleString('pt-BR'); }
 
+// Normaliza telefone para formato Evolution API: apenas dígitos, com DDI 55
+function normalizeTel(tel) {
+  // Remove tudo que não for dígito
+  let n = String(tel||'').replace(/\D/g,'');
+
+  // Se começar com 0, remover
+  if(n.startsWith('0')) n = n.slice(1);
+
+  // Se não tiver DDI (menos de 12 dígitos), adicionar 55
+  if(n.length === 10 || n.length === 11) n = '55' + n;
+
+  // Números BR com DDI: 55 + DDD(2) + número(8 ou 9) = 13 ou 14 dígitos
+  // Evolution API v2 aceita sem o 9 extra em alguns casos — enviar como está
+  return n;
+}
+
 // ── USERS ──
 function renderLoginUsers() {
   const users = getUsers();
@@ -2463,7 +2479,7 @@ async function doSendMsg(cId, text) {
     const res = await fetch(`${base}/message/sendText/${inst}`, {
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
-      body:JSON.stringify({number:c.tel, textMessage:{text}})
+      body:JSON.stringify({number:normalizeTel(c.tel), textMessage:{text}})
     });
     const ok = res.ok;
     const ts = tsNow();
@@ -2729,7 +2745,7 @@ async function fireNext() {
     const res=await fetch(`${base}/message/sendText/${inst}`,{
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
-      body:JSON.stringify({number:c.tel,textMessage:{text}})
+      body:JSON.stringify({number:normalizeTel(c.tel),textMessage:{text}})
     });
 
     let respBody = null;
@@ -2809,7 +2825,7 @@ async function sendTest() {
     const res=await fetch(`${base}/message/sendText/${inst}`,{
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
-      body:JSON.stringify({number:num,textMessage:{text:buildMsg(savedMsg,c)}})
+      body:JSON.stringify({number:normalizeTel(num),textMessage:{text:buildMsg(savedMsg,c)}})
     });
     res.ok?toast('Teste enviado ✓'):toast('Falha no teste','err');
   } catch(e){ toast('Erro: '+e.message,'err'); }
@@ -3155,7 +3171,7 @@ async function fireAgendamento(ag) {
       const res=await fetch(`${base}/message/sendText/${inst}`,{
         method:'POST',
         headers:{'Content-Type':'application/json','apikey':key},
-        body:JSON.stringify({number:c.tel,textMessage:{text}})
+        body:JSON.stringify({number:normalizeTel(c.tel),textMessage:{text}})
       });
       const ct=contacts.find(x=>x.id===c.id);
       if(ct&&res.ok) ct.status='enviado';
