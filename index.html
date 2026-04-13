@@ -1523,14 +1523,34 @@ function normalizeTel(tel) {
   // Remove tudo que não for dígito
   let n = String(tel||'').replace(/\D/g,'');
 
-  // Se começar com 0, remover
+  // Remove zero inicial
   if(n.startsWith('0')) n = n.slice(1);
 
-  // Se não tiver DDI (menos de 12 dígitos), adicionar 55
-  if(n.length === 10 || n.length === 11) n = '55' + n;
+  // Já tem DDI 55
+  if(n.startsWith('55') && n.length >= 12) {
+    const semDDI = n.slice(2);   // DDD(2) + número
+    const ddd = semDDI.slice(0,2);
+    const num = semDDI.slice(2);
 
-  // Números BR com DDI: 55 + DDD(2) + número(8 ou 9) = 13 ou 14 dígitos
-  // Evolution API v2 aceita sem o 9 extra em alguns casos — enviar como está
+    // Celular BR: DDD + 9 dígitos = 11 chars sem DDI = 13 total — ok
+    if(semDDI.length === 11) return n;
+
+    // Fixo BR: DDD + 8 dígitos = 10 chars sem DDI = 12 total — ok para fixos
+    if(semDDI.length === 10) return n;
+
+    // Celular sem o 9: DDD + 8 dígitos começando com 6,7,8,9 — adicionar 9
+    if(semDDI.length === 10 && parseInt(num[0]) >= 6) {
+      return '55' + ddd + '9' + num;
+    }
+
+    return n;
+  }
+
+  // Sem DDI: adicionar 55
+  if(n.length === 11) return '55' + n; // celular: DDD + 9 dígitos
+  if(n.length === 10) return '55' + n; // fixo: DDD + 8 dígitos
+  if(n.length === 9)  return '55' + n; // número sem DDD (raro)
+
   return n;
 }
 
@@ -2648,10 +2668,25 @@ function renderFireQueue() {
   </table>${list.length>30?`<div style="text-align:center;padding:10px;font-size:12px;color:var(--t3)">+ ${list.length-30} contatos adicionais</div>`:''}</div>`;
 }
 
-function startFire() {
+async function startFire() {
   if(!getFireMsg()){ toast('Escreva ou selecione uma mensagem primeiro','warn'); return; }
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   if(!base||!key||!inst){ toast('Configure a API primeiro','warn'); return; }
+
+  // Verificar se a instância está conectada antes de disparar
+  try {
+    const check = await fetch(`${base}/instance/fetchInstances`,{headers:{'apikey':key}});
+    if(check.ok) {
+      const d = await check.json();
+      const arr = Array.isArray(d)?d:[d];
+      const found = arr.find(i=>(i.instance?.instanceName||i.instanceName)===inst);
+      const st = found?.instance?.status||found?.status||'unknown';
+      if(st !== 'open' && st !== 'connected') {
+        toast(`⚠️ Instância "${inst}" está ${st}. Reconecte antes de disparar.`, 'err');
+        return;
+      }
+    }
+  } catch(e) { /* se não conseguir verificar, continuar assim mesmo */ }
 
   // Parar disparo anterior se existir
   if(fireActive) {
@@ -2754,15 +2789,28 @@ async function fireNext() {
     if(res.ok) {
       sucesso = true;
     } else {
+      // Capturar motivo do erro da resposta da API
       erroMotivo = respBody?.message
         || respBody?.error
         || respBody?.response?.message
+        || respBody?.response?.error
+        || (Array.isArray(respBody?.message) ? respBody.message[0] : null)
         || `HTTP ${res.status}`;
-      if(erroMotivo.toLowerCase().includes('not in whatsapp')
-        || erroMotivo.toLowerCase().includes('not a whatsapp')
-        || erroMotivo.toLowerCase().includes('does not exist')
+
+      if(typeof erroMotivo === 'object') erroMotivo = JSON.stringify(erroMotivo);
+
+      const erroLower = String(erroMotivo).toLowerCase();
+      if(erroLower.includes('not in whatsapp')
+        || erroLower.includes('not a whatsapp')
+        || erroLower.includes('does not exist')
+        || erroLower.includes('no exists')
+        || erroLower.includes('invalid')
         || res.status===400) {
         erroMotivo = 'Não é WhatsApp';
+      } else if(erroLower.includes('disconnected') || erroLower.includes('desconect')) {
+        erroMotivo = 'Instância desconectada';
+      } else if(erroLower.includes('timeout') || erroLower.includes('timed out')) {
+        erroMotivo = 'Timeout';
       }
     }
   } catch(e) {
