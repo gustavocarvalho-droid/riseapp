@@ -668,18 +668,7 @@ input[type=range]::-moz-range-thumb{
     </div>
     <div id="login-step1">
       <div class="field"><label>Selecione o usuário</label></div>
-      <div class="user-card" onclick="selUser('gustavoc')">
-        <div class="uc-av">GC</div>
-        <div><div class="uc-name">Gustavo C.</div><div class="uc-role">🔑 Master — acesso completo</div></div>
-      </div>
-      <div class="user-card" onclick="selUser('giuliab')">
-        <div class="uc-av">GB</div>
-        <div><div class="uc-name">Giulia B.</div><div class="uc-role">👤 Responsável</div></div>
-      </div>
-      <div class="user-card" onclick="selUser('larissap')">
-        <div class="uc-av">LP</div>
-        <div><div class="uc-name">Larissa P.</div><div class="uc-role">👤 Responsável</div></div>
-      </div>
+      <div id="login-users-list"></div>
     </div>
     <div id="login-step2">
       <div class="field">
@@ -1015,7 +1004,8 @@ input[type=range]::-moz-range-thumb{
             <label>Enviar para</label>
             <select id="fire-target" onchange="updDisparo()">
               <option value="all">Todos os contatos pendentes</option>
-              <option value="lista">Uma lista específica</option>
+              <option value="lista">Todos de uma lista</option>
+              <option value="lista-pendentes">Pendentes de uma lista</option>
               <option value="sel">Selecionados na tela de contatos</option>
             </select>
           </div>
@@ -1148,7 +1138,8 @@ input[type=range]::-moz-range-thumb{
               <label>Alvo</label>
               <select id="ag-target">
                 <option value="all">Todos pendentes</option>
-                <option value="lista">Lista específica</option>
+                <option value="lista">Todos de uma lista</option>
+                <option value="lista-pendentes">Pendentes de uma lista</option>
               </select>
             </div>
             <div class="field" id="ag-lista-field" style="display:none">
@@ -1521,6 +1512,20 @@ const CT_PER_PAGE = 50;
 let agTimer = null;
 
 // ── USERS ──
+function renderLoginUsers() {
+  const users = getUsers();
+  const wrap = document.getElementById('login-users-list');
+  if(!wrap) return;
+  wrap.innerHTML = Object.entries(users).map(([k,u])=>`
+    <div class="user-card" onclick="selUser('${k}')">
+      <div class="uc-av">${k.slice(0,2).toUpperCase()}</div>
+      <div>
+        <div class="uc-name">${esc(u.name)}</div>
+        <div class="uc-role">${u.master?'🔑 Master — acesso completo':'👤 Responsável'}</div>
+      </div>
+    </div>
+  `).join('');
+}
 function getUsers() {
   try {
     const d = localStorage.getItem('rise_users');
@@ -1674,6 +1679,7 @@ function iniciarApp() {
   });
 }
 (function autoLogin(){
+  renderLoginUsers();
   try {
     const s = JSON.parse(localStorage.getItem(SESS_KEY));
     if(s && Date.now()-s.ts < 8*3600*1000) {
@@ -2534,7 +2540,7 @@ function delTpl(id) {
 function updDisparo() {
   const tgt = document.getElementById('fire-target')?.value||'all';
   const lf = document.getElementById('fire-lista-field');
-  if(lf) lf.style.display = tgt==='lista'?'':'none';
+  if(lf) lf.style.display = (tgt==='lista'||tgt==='lista-pendentes') ? '' : 'none';
   const listasSel = document.getElementById('fire-lista-sel');
   if(listasSel) {
     const cur = listasSel.value;
@@ -2544,19 +2550,21 @@ function updDisparo() {
   }
   const list = getFireList();
   const pc = document.getElementById('fire-preview-count');
-  if(pc) pc.textContent = `📋 ${list.length} contato(s) no alvo`;
-
-  // Render fila
+  if(pc) pc.innerHTML = `<span style="color:var(--g)">📋</span> ${list.length} contato(s) no alvo`;
   renderFireQueue();
 }
 
 function getFireList() {
   const tgt = document.getElementById('fire-target')?.value||'all';
-  if(tgt==='lista') {
+  if(tgt==='lista' || tgt==='lista-pendentes') {
     const listaId = document.getElementById('fire-lista-sel')?.value;
     if(listaId) {
       const lista = listas.find(l=>String(l.id)===listaId);
-      if(lista) return contacts.filter(c=>lista.contatos.includes(c.id));
+      if(lista) {
+        const base = contacts.filter(c=>lista.contatos.includes(c.id));
+        // lista-pendentes: apenas os que ainda não foram enviados
+        return tgt==='lista-pendentes' ? base.filter(c=>c.status!=='enviado') : base;
+      }
     }
     return [];
   }
@@ -2600,8 +2608,9 @@ function startFire() {
   filaIdx = 0; fireActive = true;
   // Gerar ID único para esta sessão de disparo
   const tgt = document.getElementById('fire-target')?.value||'all';
-  const listaId = tgt==='lista' ? (document.getElementById('fire-lista-sel')?.value||null) : null;
-  const listaNome = listaId ? (listas.find(l=>String(l.id)===listaId)?.nome||'Lista') : 'Todos pendentes';
+  const listaId = (tgt==='lista'||tgt==='lista-pendentes') ? (document.getElementById('fire-lista-sel')?.value||null) : null;
+  const listaBase = listaId ? (listas.find(l=>String(l.id)===listaId)?.nome||'Lista') : null;
+  const listaNome = listaBase ? (tgt==='lista-pendentes' ? `Pendentes — ${listaBase}` : listaBase) : 'Todos pendentes';
   currentFireSession = { id: uid(), listaId, listaNome, startedAt: new Date().toLocaleString('pt-BR'), total: fireList.length };
   document.getElementById('fire-btn').disabled = true;
   document.getElementById('fire-banner').style.display='block';
@@ -2754,7 +2763,7 @@ function criarAgendamento() {
   const dt=new Date(`${data}T${hora}`);
   if(dt<=new Date()){ toast('Data/hora deve ser no futuro','warn'); return; }
   const tgt=document.getElementById('ag-target')?.value||'all';
-  const listaId=tgt==='lista'?(document.getElementById('ag-lista-sel')?.value||null):null;
+  const listaId=(tgt==='lista'||tgt==='lista-pendentes')?(document.getElementById('ag-lista-sel')?.value||null):null;
   agendamentos.push({
     id:uid(), nome, data, hora,
     ts:dt.getTime(), target:tgt,
@@ -2809,7 +2818,7 @@ function renderAgendamentos() {
         <div class="sched-info">
           <div class="sched-title">${esc(ag.nome)}</div>
           <div class="sched-meta" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:3px">
-            <span>📋 ${ag.target==='lista'?`Lista: ${esc(listas.find(l=>l.id==ag.listaId)?.nome||'—')}`:'Todos pendentes'}</span>
+            <span>📋 ${ag.target==='lista'?`Lista: ${esc(listas.find(l=>l.id==ag.listaId)?.nome||'—')}`:ag.target==='lista-pendentes'?`Pendentes de: ${esc(listas.find(l=>l.id==ag.listaId)?.nome||'—')}`:'Todos pendentes'}</span>
             <span>⏱ ${ag.minInterval||10}s–${ag.maxInterval||25}s</span>
             ${ag.maxQty>0?`<span>📨 ${ag.maxQty} msgs</span>`:''}
           </div>
@@ -3067,9 +3076,12 @@ async function fireAgendamento(ag) {
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   if(!base||!key||!inst){ ag.status='pending'; return; }
   let list=[];
-  if(ag.target==='lista'&&ag.listaId){
+  if((ag.target==='lista'||ag.target==='lista-pendentes')&&ag.listaId){
     const l=listas.find(x=>x.id==ag.listaId);
-    if(l) list=contacts.filter(c=>l.contatos.includes(c.id));
+    if(l){
+      list=contacts.filter(c=>l.contatos.includes(c.id));
+      if(ag.target==='lista-pendentes') list=list.filter(c=>c.status!=='enviado');
+    }
   } else {
     list=contacts.filter(c=>c.status!=='enviado');
   }
@@ -3681,7 +3693,7 @@ function _doAddUser() {
     div.innerHTML=`<div class="uc-av">${key.slice(0,2).toUpperCase()}</div><div><div class="uc-name">${esc(name)}</div><div class="uc-role">${role==='master'?'🔑 Master':'👤 Usuário padrão'}</div></div>`;
     step1.appendChild(div);
   }
-  closeModal(); renderConfig(); toast(`Usuário ${name} criado`);
+  closeModal(); renderConfig(); renderLoginUsers(); toast(`Usuário ${name} criado`);
 }
 
 // ── MODAL ──
@@ -3696,7 +3708,7 @@ function closeModal() {
 // ── INIT ──
 document.getElementById('ag-target')?.addEventListener('change', function(){
   const f=document.getElementById('ag-lista-field');
-  if(f) f.style.display=this.value==='lista'?'':'none';
+  if(f) f.style.display=(this.value==='lista'||this.value==='lista-pendentes')?'':'none';
 });
 
 // Populate ag lista sel whenever listas changes (covered in renderAgendamentos)
@@ -3973,6 +3985,7 @@ function doLogout() {
   document.getElementById('login-step2').style.display='none';
   document.querySelectorAll('.user-card').forEach(el=>el.classList.remove('sel'));
   selUsuario = null;
+  renderLoginUsers();
   toast('Sessão encerrada');
 }
 
