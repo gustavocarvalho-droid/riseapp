@@ -1511,6 +1511,13 @@ let ctPage = 0;
 const CT_PER_PAGE = 50;
 let agTimer = null;
 
+// ── UTILS (declaradas cedo para uso no login) ──
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt(t){ const s=String(t||''); return s.startsWith('55')?'+'+s:s; }
+function initials(name){ return (name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'?'; }
+function uid(){ return Date.now()+'_'+Math.random().toString(36).slice(2,7); }
+function tsNow(){ return new Date().toLocaleString('pt-BR'); }
+
 // ── USERS ──
 function renderLoginUsers() {
   const users = getUsers();
@@ -1531,13 +1538,35 @@ function getUsers() {
     const d = localStorage.getItem('rise_users');
     if (d) return JSON.parse(d);
   } catch(e) {}
+  // Fallback: usuários padrão (serão sobrescritos ao carregar do banco)
   return {
     gustavoc: {name:'Gustavo C.', role:'Master', master:true, pass:btoa('rise123')},
     giuliab:  {name:'Giulia B.',  role:'Responsável', master:false, pass:btoa('rise123')},
     larissap: {name:'Larissa P.', role:'Responsável', master:false, pass:btoa('rise123')},
   };
 }
-function saveUsers(u) { localStorage.setItem('rise_users', JSON.stringify(u)); }
+function saveUsers(u) {
+  localStorage.setItem('rise_users', JSON.stringify(u));
+  // Salvar no banco também para sincronizar entre dispositivos
+  fetch('/api/dados', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-user-key':'_system_users'},
+    body: JSON.stringify({users: u})
+  }).catch(()=>{});
+}
+
+// Carregar usuários do banco (sincroniza entre dispositivos)
+async function carregarUsuariosDoBanco() {
+  try {
+    const res = await fetch('/api/dados', {headers:{'x-user-key':'_system_users'}});
+    if(!res.ok) return;
+    const d = await res.json();
+    if(d.users && Object.keys(d.users).length >= 3) {
+      localStorage.setItem('rise_users', JSON.stringify(d.users));
+      renderLoginUsers();
+    }
+  } catch(e) {}
+}
 
 // ── CONFIG ──
 function getCfgKey() {
@@ -1679,19 +1708,24 @@ function iniciarApp() {
   });
 }
 (function autoLogin(){
-  renderLoginUsers();
-  try {
-    const s = JSON.parse(localStorage.getItem(SESS_KEY));
-    if(s && Date.now()-s.ts < 8*3600*1000) {
-      const users = getUsers();
-      if(users[s.key]) {
-        selUsuario = s.key;
-        currentUser = {key:s.key, ...users[s.key]};
-        iniciarApp();
-        return;
+  // Primeiro carrega usuários do banco (async), depois tenta auto-login
+  carregarUsuariosDoBanco().then(() => {
+    renderLoginUsers();
+    try {
+      const s = JSON.parse(localStorage.getItem(SESS_KEY));
+      if(s && Date.now()-s.ts < 8*3600*1000) {
+        const users = getUsers();
+        if(users[s.key]) {
+          selUsuario = s.key;
+          currentUser = {key:s.key, ...users[s.key]};
+          iniciarApp();
+          return;
+        }
       }
-    }
-  } catch(e) {}
+    } catch(e) {}
+  });
+  // Renderizar imediatamente com o que está no localStorage (enquanto carrega do banco)
+  renderLoginUsers();
 })();
 
 // ── PERSIST: NEON ──
@@ -1859,13 +1893,6 @@ async function carregarLogsGlobais() {
   // allLogs agora tem todos; ordenar por time desc
   allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
 }
-
-// ── UTILS ──
-function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function fmt(t){ const s=String(t||''); return s.startsWith('55')?'+'+s:s; }
-function initials(name){ return (name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'?'; }
-function uid(){ return Date.now()+'_'+Math.random().toString(36).slice(2,7); }
-function tsNow(){ return new Date().toLocaleString('pt-BR'); }
 
 function updBadges() {
   document.getElementById('nb-contatos').textContent = contacts.length;
