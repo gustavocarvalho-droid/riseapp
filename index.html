@@ -2583,23 +2583,32 @@ function updDisparo() {
 
 function getFireList() {
   const tgt = document.getElementById('fire-target')?.value||'all';
+  let list = [];
+
   if(tgt==='lista' || tgt==='lista-pendentes') {
     const listaId = document.getElementById('fire-lista-sel')?.value;
     if(listaId) {
       const lista = listas.find(l=>String(l.id)===listaId);
       if(lista) {
-        const base = contacts.filter(c=>lista.contatos.includes(c.id));
-        // lista-pendentes: apenas os que ainda não foram enviados
-        return tgt==='lista-pendentes' ? base.filter(c=>c.status!=='enviado') : base;
+        list = contacts.filter(c=>lista.contatos.includes(c.id));
+        if(tgt==='lista-pendentes') list = list.filter(c=>c.status!=='enviado');
       }
     }
-    return [];
-  }
-  if(tgt==='sel') {
+  } else if(tgt==='sel') {
     const sels = Array.from(document.querySelectorAll('.c-chk:checked')).map(c=>parseInt(c.dataset.id));
-    if(sels.length) return contacts.filter(c=>sels.includes(c.id));
+    if(sels.length) list = contacts.filter(c=>sels.includes(c.id));
+  } else {
+    list = contacts.filter(c=>c.status!=='enviado');
   }
-  return contacts.filter(c=>c.status!=='enviado');
+
+  // Deduplicar por telefone — nunca dois contatos com o mesmo número
+  const seenTel = new Set();
+  return list.filter(c => {
+    const tel = (c.tel||'').replace(/\D/g,'');
+    if(!tel || seenTel.has(tel)) return false;
+    seenTel.add(tel);
+    return true;
+  });
 }
 
 function renderFireQueue() {
@@ -2627,25 +2636,47 @@ function startFire() {
   if(!getFireMsg()){ toast('Escreva ou selecione uma mensagem primeiro','warn'); return; }
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   if(!base||!key||!inst){ toast('Configure a API primeiro','warn'); return; }
+
+  // Parar disparo anterior se existir
+  if(fireActive) {
+    fireActive=false;
+    clearTimeout(fireTimer);
+  }
+
   const list = getFireList();
   if(!list.length){ toast('Nenhum contato no alvo','warn'); return; }
   const fireQty = getFireQty();
   const fireList = fireQty > 0 ? list.slice(0, fireQty) : list;
-  fila = fireList.map(c=>c.id);
-  filaIdx = 0; fireActive = true;
-  // Gerar ID único para esta sessão de disparo
+
+  // Desduplicar por ID — nunca enviar para o mesmo contato duas vezes
+  const seen = new Set();
+  const deduped = fireList.filter(c => {
+    if(seen.has(c.id)) return false;
+    seen.add(c.id);
+    return true;
+  });
+
+  fila = deduped.map(c=>c.id);
+  filaIdx = 0;
+  fireActive = true;
+
   const tgt = document.getElementById('fire-target')?.value||'all';
   const listaId = (tgt==='lista'||tgt==='lista-pendentes') ? (document.getElementById('fire-lista-sel')?.value||null) : null;
   const listaBase = listaId ? (listas.find(l=>String(l.id)===listaId)?.nome||'Lista') : null;
   const listaNome = listaBase ? (tgt==='lista-pendentes' ? `Pendentes — ${listaBase}` : listaBase) : 'Todos pendentes';
-  currentFireSession = { id: uid(), listaId, listaNome, startedAt: new Date().toLocaleString('pt-BR'), total: fireList.length };
+  currentFireSession = { id: uid(), listaId, listaNome, startedAt: new Date().toLocaleString('pt-BR'), total: deduped.length };
+  fireSessionToken = currentFireSession.id; // ativar token da sessão
+
   document.getElementById('fire-btn').disabled = true;
   document.getElementById('fire-banner').style.display='block';
   updFireUI();
-  fireNext();
+
+  // Pequeno delay para garantir que qualquer loop anterior terminou
+  setTimeout(fireNext, 100);
 }
 function stopFire() {
   fireActive=false;
+  fireSessionToken=null; // invalidar sessão atual
   clearTimeout(fireTimer);
   document.getElementById('fire-btn').disabled=false;
   document.getElementById('fire-banner').style.display='none';
@@ -2662,22 +2693,26 @@ function updFireUI() {
   if(txt) txt.textContent=`${done} / ${total}`;
   updFireTimeline();
 }
+let fireSessionToken = null; // token da sessão atual — invalida loops anteriores
+
 async function fireNext() {
   if(!fireActive) return;
+
+  // Guard: usar token da sessão para evitar loops paralelos
+  const myToken = currentFireSession?.id;
+  if(!myToken || fireSessionToken !== myToken) return;
+
   if(filaIdx>=fila.length) {
     fireActive=false;
     document.getElementById('fire-btn').disabled=false;
     document.getElementById('fire-banner').style.display='none';
-    const env=logs.filter(l=>l.status==='enviado'&&fila.includes(l.id)).length;
-    const total=fila.length;
-    toast(`🚀 Disparo concluído! ${total} processados`);
+    toast(`🚀 Disparo concluído! ${fila.length} processados`);
     salvarDados(); renderC(); updBadges(); renderLogs(); return;
   }
   const cId=fila[filaIdx];
   const c=contacts.find(x=>x.id===cId);
   filaIdx++;
   updFireUI();
-  // Pular contato inexistente mas continuar
   if(!c){ fireNext(); return; }
 
   const cur = document.getElementById('fire-current');
@@ -2697,19 +2732,16 @@ async function fireNext() {
       body:JSON.stringify({number:c.tel,textMessage:{text}})
     });
 
-    // Tentar ler o corpo da resposta para pegar o motivo do erro
     let respBody = null;
     try { respBody = await res.json(); } catch(e) {}
 
     if(res.ok) {
       sucesso = true;
     } else {
-      // Capturar motivo do erro da resposta da API
       erroMotivo = respBody?.message
         || respBody?.error
         || respBody?.response?.message
         || `HTTP ${res.status}`;
-      // Detectar número não WhatsApp
       if(erroMotivo.toLowerCase().includes('not in whatsapp')
         || erroMotivo.toLowerCase().includes('not a whatsapp')
         || erroMotivo.toLowerCase().includes('does not exist')
@@ -2721,7 +2753,9 @@ async function fireNext() {
     erroMotivo = e.message || 'Erro de conexão';
   }
 
-  // Atualizar status do contato — SEMPRE continua
+  // Verificar se a sessão ainda é válida (usuário pode ter parado)
+  if(!fireActive || fireSessionToken !== myToken) return;
+
   const ct=contacts.find(x=>x.id===cId);
   if(ct) ct.status=sucesso?'enviado':'falha';
 
