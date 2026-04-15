@@ -1766,18 +1766,24 @@ function iniciarApp() {
 
 // ── PERSIST: NEON ──
 let saveTimeout = null;
+let saveFailCount = 0;
 function salvarDados() {
-  clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(_saveNeon, 1500);
+  // Durante disparo ativo: salvar imediatamente (sem debounce)
+  // Fora de disparo: debounce de 1500ms para não sobrecarregar
+  if(fireActive) {
+    _saveNeon();
+  } else {
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(_saveNeon, 1500);
+  }
 }
 async function salvarImediato() { await _saveNeon(); }
 async function _saveNeon() {
   const ind = document.getElementById('save-indicator');
   const userKey = currentUser?.key || 'shared';
 
-  // Sincronizar allLogs: substituir/adicionar os logs próprios
+  // Sincronizar allLogs com os logs próprios
   const ownName = currentUser?.name||'';
-  // Remove entradas próprias antigas do allLogs e reinsere atualizadas
   allLogs = allLogs.filter(l => l._owner && l._owner !== ownName);
   logs.forEach(l => { if(!allLogs.find(x=>x.id===l.id)) allLogs.push({...l, _owner: ownName}); });
   allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
@@ -1790,8 +1796,16 @@ async function _saveNeon() {
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
     if(ind){ind.style.opacity='1';setTimeout(()=>ind.style.opacity='0',2000);}
+    saveFailCount = 0;
   } catch(e) {
+    saveFailCount++;
     console.warn('Save error:', e);
+    // Mostrar aviso se falhar 3x seguidas
+    if(saveFailCount >= 3) {
+      if(ind){ ind.style.opacity='1'; ind.style.color='var(--red)'; ind.textContent='⚠ Erro ao salvar'; }
+      toast('⚠ Erro ao salvar dados no banco. Verifique a conexão.','err');
+      saveFailCount = 0;
+    }
   }
 }
 async function carregarDados() {
@@ -2727,12 +2741,12 @@ async function startFire() {
 }
 function stopFire() {
   fireActive=false;
-  fireSessionToken=null; // invalidar sessão atual
+  fireSessionToken=null;
   clearTimeout(fireTimer);
   document.getElementById('fire-btn').disabled=false;
   document.getElementById('fire-banner').style.display='none';
   toast('Disparo parado','warn');
-  salvarDados();
+  salvarImediato(); // salvar imediatamente ao parar
 }
 function updFireUI() {
   const total=fila.length;
@@ -2758,7 +2772,8 @@ async function fireNext() {
     document.getElementById('fire-btn').disabled=false;
     document.getElementById('fire-banner').style.display='none';
     toast(`🚀 Disparo concluído! ${fila.length} processados`);
-    salvarDados(); renderC(); updBadges(); renderLogs(); return;
+    await salvarImediato(); // salvar imediatamente ao concluir
+    renderC(); updBadges(); renderLogs(); return;
   }
   const cId=fila[filaIdx];
   const c=contacts.find(x=>x.id===cId);
@@ -2840,7 +2855,7 @@ async function fireNext() {
   if(!chatLogs[cId]) chatLogs[cId]=[];
   if(sucesso) chatLogs[cId].push({text,dir:'out',time:ts,ts:Math.floor(Date.now()/1000)});
 
-  // Atualizar UI em tempo real
+  // Salvar a cada envio durante o disparo (fireActive=true faz save imediato)
   salvarDados();
   if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
   updBadges();
