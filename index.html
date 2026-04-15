@@ -1767,18 +1767,36 @@ function iniciarApp() {
 // ── PERSIST: NEON ──
 let saveTimeout = null;
 let saveFailCount = 0;
+let _isSaving = false;      // lock: só um save por vez
+let _pendingSave = false;   // flag: tem save pendente esperando
+
 function salvarDados() {
-  // Durante disparo ativo: salvar imediatamente (sem debounce)
-  // Fora de disparo: debounce de 1500ms para não sobrecarregar
   if(fireActive) {
-    _saveNeon();
+    // Durante disparo: agendar save mas respeitar o lock
+    _pendingSave = true;
+    if(!_isSaving) _flushSave();
   } else {
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(_saveNeon, 1500);
+    saveTimeout = setTimeout(()=>{ _pendingSave=true; _flushSave(); }, 1500);
   }
 }
-async function salvarImediato() { await _saveNeon(); }
+
+function _flushSave() {
+  if(_isSaving || !_pendingSave) return;
+  _pendingSave = false;
+  _saveNeon();
+}
+
+async function salvarImediato() {
+  // Esperar save em andamento terminar, depois salvar
+  while(_isSaving) await new Promise(r=>setTimeout(r,100));
+  await _saveNeon();
+}
+
 async function _saveNeon() {
+  if(_isSaving) { _pendingSave=true; return; } // já salvando, marcar pendente
+  _isSaving = true;
+
   const ind = document.getElementById('save-indicator');
   const userKey = currentUser?.key || 'shared';
 
@@ -1788,23 +1806,40 @@ async function _saveNeon() {
   logs.forEach(l => { if(!allLogs.find(x=>x.id===l.id)) allLogs.push({...l, _owner: ownName}); });
   allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
 
+  // Snapshot dos dados no momento do save (evita capturar estado parcial)
+  const payload = JSON.stringify({
+    contacts, listas, logs, crm:crmData, fila, agendamentos,
+    savedmsg:savedMsg, config:{tpls}, chatLogs, crmCustomCols
+  });
+
   try {
     const res = await fetch('/api/dados', {
       method:'POST',
       headers:{'Content-Type':'application/json','x-user-key': userKey},
-      body:JSON.stringify({contacts,listas,logs,crm:crmData,fila,agendamentos,savedmsg:savedMsg,config:{tpls},chatLogs,crmCustomCols})
+      body: payload
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
-    if(ind){ind.style.opacity='1';setTimeout(()=>ind.style.opacity='0',2000);}
+    if(ind){
+      ind.style.color='var(--g)';
+      ind.textContent='💾 Salvo';
+      ind.style.opacity='1';
+      setTimeout(()=>ind.style.opacity='0',2000);
+    }
     saveFailCount = 0;
   } catch(e) {
     saveFailCount++;
     console.warn('Save error:', e);
-    // Mostrar aviso se falhar 3x seguidas
     if(saveFailCount >= 3) {
       if(ind){ ind.style.opacity='1'; ind.style.color='var(--red)'; ind.textContent='⚠ Erro ao salvar'; }
-      toast('⚠ Erro ao salvar dados no banco. Verifique a conexão.','err');
+      toast('⚠ Erro ao salvar dados. Verifique a conexão.','err');
       saveFailCount = 0;
+    }
+  } finally {
+    _isSaving = false;
+    // Se tem save pendente, executar agora com dados mais recentes
+    if(_pendingSave) {
+      _pendingSave = false;
+      setTimeout(_saveNeon, 50);
     }
   }
 }
