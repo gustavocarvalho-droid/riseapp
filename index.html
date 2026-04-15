@@ -3698,6 +3698,7 @@ function renderConfig() {
           <div style="font-size:11px;color:var(--t3)">${u.master?'🔑 Master':'👤 Usuário'}</div>
         </div>
         <button class="btn btn-xs" onclick="changePwd('${k}')">🔑 Senha</button>
+        ${k !== currentUser?.key ? `<button class="btn btn-xs btn-danger" onclick="confirmarExcluirUsuario('${k}','${esc(u.name)}')">🗑</button>` : `<span style="font-size:10px;color:var(--t3);padding:0 4px">você</span>`}
       </div>
     `).join('');
   }
@@ -3765,6 +3766,35 @@ function _saveUserInst(userKey) {
     toast(`Instância de ${getUsers()[userKey]?.name} atualizada`);
   }
 }
+function confirmarExcluirUsuario(key, name) {
+  showModal(`
+    <div class="modal-title">🗑 Excluir usuário</div>
+    <div class="modal-sub">Tem certeza que deseja excluir <b>${esc(name)}</b>?</div>
+    <div style="background:rgba(255,82,82,.08);border:1px solid rgba(255,82,82,.2);border-radius:9px;padding:12px 14px;font-size:12px;color:var(--t2);margin-bottom:4px">
+      ⚠️ Esta ação é irreversível. Os dados do usuário no banco <b>não</b> serão apagados automaticamente — apenas o acesso será removido.
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger btn-sm" onclick="excluirUsuario('${key}')">🗑 Excluir</button>
+    </div>
+  `);
+}
+function excluirUsuario(key) {
+  const users = getUsers();
+  if(!users[key]){ toast('Usuário não encontrado','err'); closeModal(); return; }
+  if(users[key].master && Object.values(users).filter(u=>u.master).length <= 1) {
+    toast('Não é possível excluir o único Master','err'); closeModal(); return;
+  }
+  delete users[key];
+  saveUsers(users);
+  // Remover config de instância do localStorage
+  localStorage.removeItem(CFG_KEY+'_'+key);
+  closeModal();
+  renderConfig();
+  renderLoginUsers();
+  toast(`Usuário excluído ✓`);
+}
+
 function changePwd(key) {
   showModal(`
     <div class="modal-title">🔑 Alterar senha de ${key}</div>
