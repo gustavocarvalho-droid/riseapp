@@ -1653,7 +1653,14 @@ function saveCfgLocal(c) {
     }).catch(()=>{});
   }
 }
-function getApiBase(){ return (getCfg().url||'').replace(/\/$/,''); }
+function getApiBase(){
+  let url = (getCfg().url||'').trim();
+  // Remover TODAS as barras do final
+  url = url.replace(/\/+$/, '');
+  // Garantir que não tem barra dupla no meio (exceto após https://)
+  url = url.replace(/([^:])\/\/+/g, '$1/');
+  return url;
+}
 function getApiKey() { return getCfg().key||''; }
 function getInst()   { return getCfg().inst||''; }
 
@@ -2674,16 +2681,11 @@ async function doSendMsg(cId, text) {
   const base = getApiBase(); const key = getApiKey(); const inst = getInst();
   if(!base||!key||!inst){ toast('Configure a API primeiro','warn'); return; }
   try {
-    const res = await fetch(`${base}/message/sendText/${inst}`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key},
-      body:JSON.stringify({number:normalizeTel(c.tel), textMessage:{text}})
-    });
-    const ok = res.ok;
+    const r = await sendWhatsApp(base, key, inst, c.tel, text);
     const ts = tsNow();
     if(!chatLogs[cId]) chatLogs[cId]=[];
     chatLogs[cId].push({text, dir:'out', time:ts, ts:Math.floor(Date.now()/1000)});
-    if(ok) {
+    if(r.ok) {
       c.status='enviado';
       logs.unshift({id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:'enviado',msg:text.slice(0,60),enviadoPor:currentUser?.name||''});
       toast('Mensagem enviada ✓');
@@ -2695,7 +2697,6 @@ async function doSendMsg(cId, text) {
     if(chatContact?.id===cId) renderChatHistory();
     renderChatList();
     updBadges();
-    // Atualizar relatório se estiver aberto
     if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
   } catch(e) {
     toast('Erro de conexão: '+e.message,'err');
@@ -2971,17 +2972,22 @@ async function fireNext() {
   let erroMotivo = '';
   let sucesso = false;
 
-  try {
-    const res=await fetch(`${base}/message/sendText/${inst}`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key},
-      body:JSON.stringify({number:normalizeTel(c.tel),textMessage:{text}})
-    });
+  // Validar URL antes de enviar
+  const sendUrl = `${base}/message/sendText/${inst}`;
+  if(!base || !inst || !sendUrl.startsWith('http')) {
+    erroMotivo = `URL inválida: base="${base}" inst="${inst}"`;
+    console.error('[Fire] URL inválida:', sendUrl);
+  } else {
+    console.log(`[Fire] POST ${sendUrl} → ${normalizeTel(c.tel)}`);
+  }
 
-    let respBody = null;
-    try { respBody = await res.json(); } catch(e) {}
+  if(!erroMotivo) try {
+    const r = await sendWhatsApp(base, key, inst, c.tel, text);
+    const respBody = r.body;
 
-    if(res.ok) {
+    console.log(`[Fire] Resposta: ${r.status}`, respBody);
+
+    if(r.ok) {
       sucesso = true;
     } else {
       erroMotivo = respBody?.message
@@ -2989,7 +2995,7 @@ async function fireNext() {
         || respBody?.response?.message
         || respBody?.response?.error
         || (Array.isArray(respBody?.message) ? respBody.message[0] : null)
-        || `HTTP ${res.status}`;
+        || `HTTP ${r.status}`;
 
       if(typeof erroMotivo === 'object') erroMotivo = JSON.stringify(erroMotivo);
 
@@ -3002,26 +3008,22 @@ async function fireNext() {
       } else if(erroLower.includes('disconnected') || erroLower.includes('desconect')
         || erroLower.includes('logout') || erroLower.includes('close')) {
         erroMotivo = 'Instância desconectada';
-        // Se instância desconectou, parar o disparo inteiro
         if(fireActive) {
-          fireActive = false;
-          fireSessionToken = null;
-          clearTimeout(fireTimer);
+          fireActive = false; fireSessionToken = null; clearTimeout(fireTimer);
           document.getElementById('fire-btn').disabled=false;
           document.getElementById('fire-banner').style.display='none';
-          toast('⚠️ Instância desconectada durante o disparo. Reconecte em Meu Número.', 'err');
+          toast('⚠️ Instância desconectada. Reconecte em Meu Número.', 'err');
           await salvarImediato();
         }
       } else if(erroLower.includes('timeout') || erroLower.includes('timed out')) {
         erroMotivo = 'Timeout';
-      } else if(erroLower.includes('invalid') && res.status===400) {
-        // 400 com "invalid" = número inválido mesmo
+      } else if(erroLower.includes('invalid') && r.status===400) {
         erroMotivo = 'Não é WhatsApp';
       }
-      // HTTP 400 genérico sem mensagem clara = erro na API, não no número
     }
   } catch(e) {
     erroMotivo = e.message || 'Erro de conexão';
+    console.error('[Fire] Fetch error:', e);
   }
 
   // Verificar se a sessão ainda é válida (usuário pode ter parado)
@@ -3058,6 +3060,27 @@ async function fireNext() {
   const delay=(min+Math.random()*(max-min))*1000;
   fireTimer=setTimeout(fireNext,delay);
 }
+// Função unificada de envio com diagnóstico completo
+async function sendWhatsApp(base, key, inst, tel, text) {
+  const number = normalizeTel(tel);
+  const url = `${base}/message/sendText/${inst}`;
+  const body = JSON.stringify({ number, textMessage: { text } });
+
+  console.log(`[Send] POST ${url} → ${number}`);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': key },
+    body
+  });
+
+  let respBody = null;
+  try { respBody = await res.json(); } catch(e) {}
+  console.log(`[Send] ${res.status}`, JSON.stringify(respBody).slice(0,120));
+
+  return { ok: res.ok, status: res.status, body: respBody, urlUsed: url };
+}
+
 function buildMsg(tpl,c) {
   return (tpl||'').replace(/\{nome\}/g,c.nome||'').replace(/\{empresa\}/g,c.empresa||'').replace(/\{tel\}/g,fmt(c.tel)).replace(/\{cidade\}/g,c.cidade||'');
 }
@@ -3071,19 +3094,47 @@ function sendMsg(cId) {
 async function sendTest() {
   const num=(document.getElementById('fire-test-num')?.value||'').replace(/\D/g,'');
   if(!num){ toast('Informe o número de teste','warn'); return; }
-  if(!savedMsg){ toast('Salve uma mensagem primeiro','warn'); return; }
   const c={tel:num,nome:'Teste',empresa:'—',cidade:'—'};
   const base=getApiBase();const key=getApiKey();const inst=getInst();
-  if(!base||!key||!inst){ toast('Configure a API','warn'); return; }
+  if(!base||!key||!inst){ toast('Configure a API e instância primeiro','warn'); return; }
+  const msg = savedMsg || 'Teste de conexão Rise WA';
   toast('Enviando teste...','info');
   try {
-    const res=await fetch(`${base}/message/sendText/${inst}`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key},
-      body:JSON.stringify({number:normalizeTel(num),textMessage:{text:buildMsg(savedMsg,c)}})
-    });
-    res.ok?toast('Teste enviado ✓'):toast('Falha no teste','err');
-  } catch(e){ toast('Erro: '+e.message,'err'); }
+    const r=await sendWhatsApp(base,key,inst,num,buildMsg(msg,c));
+    const body = r.body;
+    if(r.ok){
+      toast('✅ Teste enviado com sucesso!');
+    } else {
+      const errMsg = body?.message || body?.error || body?.response?.message || `HTTP ${res.status}`;
+      const detail = typeof errMsg === 'object' ? JSON.stringify(errMsg) : String(errMsg);
+      toast(`❌ Falha: ${detail.slice(0,80)}`, 'err');
+      console.error('[Teste] Erro:', r.status, body);
+      // Mostrar diagnóstico
+      showModal(`
+        <div class="modal-title">❌ Falha no Teste de Envio</div>
+        <div class="modal-sub">Instância: <b>${esc(inst)}</b> — HTTP ${r.status}</div>
+        <div style="background:var(--s2);border:1px solid var(--bd2);border-radius:9px;padding:12px;font-size:12px;font-family:var(--mono);color:var(--t2);margin-bottom:12px;word-break:break-all">
+          ${esc(detail)}
+        </div>
+        <div style="font-size:12px;color:var(--t3);margin-bottom:16px">
+          <b style="color:var(--t)">URL:</b> ${esc(base)}<br>
+          <b style="color:var(--t)">Instância:</b> ${esc(inst)}<br>
+          <b style="color:var(--t)">Número:</b> ${esc(normalizeTel(num))}
+        </div>
+        <div style="background:rgba(255,171,64,.08);border:1px solid rgba(255,171,64,.2);border-radius:9px;padding:12px;font-size:12px;color:var(--t2)">
+          💡 <b>Se o erro for "Bad Request":</b> a instância está desconectada do WhatsApp.<br>
+          Vá em <b>Meu Número → Gerar QR</b> e escaneie com o celular.
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-sm" onclick="closeModal()">Fechar</button>
+          <button class="btn btn-primary btn-sm" onclick="closeModal();go('numero')">📱 Ir para Meu Número</button>
+        </div>
+      `);
+    }
+  } catch(e){
+    toast('Erro de conexão: '+e.message,'err');
+    console.error('[Teste] Exceção:', e);
+  }
 }
 
 // ── AGENDAMENTO ──
@@ -3423,11 +3474,7 @@ async function fireAgendamento(ag) {
     const text=buildMsg(ag.msg||savedMsg, c);
     const ts=tsNow();
     try {
-      const res=await fetch(`${base}/message/sendText/${inst}`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json','apikey':key},
-        body:JSON.stringify({number:normalizeTel(c.tel),textMessage:{text}})
-      });
+      const res=await sendWhatsApp(base,key,inst,c.tel,text);
       const ct=contacts.find(x=>x.id===c.id);
       if(ct&&res.ok) ct.status='enviado';
       const logEntry={id:uid(),time:ts,nome:c.nome,empresa:c.empresa,tel:c.tel,status:res.ok?'enviado':'falha',msg:text.slice(0,60),enviadoPor:currentUser?.name||'',agId:ag.id,sessionId:ag.id,listaNome:ag.nome,sessionStartedAt:ag.data+' '+ag.hora};
