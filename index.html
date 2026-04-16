@@ -1811,6 +1811,7 @@ function iniciarApp() {
       startPolling();
       startUsersPolling();
       startDataSync();
+      startConnCheck(); // verificar conexão a cada 60s
       renderC();
       updBadges();
       startAgTimer();
@@ -3751,7 +3752,9 @@ async function checkNum() {
   if(!base||!key||!inst){
     if(wrap) wrap.innerHTML='<p style="color:var(--t3)">Configure a API nas Configurações.</p>';
     if(cdot){ cdot.className='cdot'; }
-    if(clbl) clbl.textContent='Não configurado';
+    if(clbl) clbl.textContent='Sem instância';
+    // Mostrar alerta fixo no topo se não tem instância
+    _showConnBanner('noconfig');
     return;
   }
   if(clbl) clbl.textContent='Verificando...';
@@ -3763,20 +3766,59 @@ async function checkNum() {
     const st=found?.instance?.status||found?.status||'unknown';
     const isConn=st==='open'||st==='connected';
     if(cdot){ cdot.className='cdot'+(isConn?' on':' warn'); }
-    if(clbl) clbl.textContent=isConn?`✓ ${inst}`:`⚠ ${st}`;
+    if(clbl) clbl.textContent=isConn?`✓ ${inst}`:`⚠ ${inst} (${st})`;
     if(wrap) wrap.innerHTML=`
-      <div class="badge ${isConn?'badge-green':'badge-amber'}" style="margin-bottom:12px">${isConn?'✓ Conectado':'⚠ '+st}</div>
+      <div class="badge ${isConn?'badge-green':'badge-red'}" style="margin-bottom:12px;font-size:13px;padding:6px 14px">
+        ${isConn?'✅ Conectado':'❌ Desconectado — '+st}
+      </div>
       <div style="font-size:13px;color:var(--t2);line-height:2">
         Instância: <b style="color:var(--t)">${esc(inst)}</b><br>
-        Status: <b style="color:var(--t)">${esc(st)}</b>
+        Status: <b style="${isConn?'color:var(--g)':'color:var(--red)'}">${esc(st)}</b>
       </div>
+      ${!isConn?`<div style="margin-top:10px;padding:10px 14px;background:rgba(255,82,82,.08);border:1px solid rgba(255,82,82,.2);border-radius:9px;font-size:12px;color:var(--t2)">
+        ⚠️ WhatsApp desconectado. Gere o QR abaixo e escaneie com o celular.
+      </div>`:''}
     `;
     if(info) info.innerHTML=`API: <b style="color:var(--t)">${esc(base)}</b><br>Instância: <b style="color:var(--t)">${esc(inst)}</b>`;
+    _showConnBanner(isConn?'ok':'disconnected');
   } catch(e) {
-    if(cdot) cdot.className='cdot';
-    if(clbl) clbl.textContent='Erro de conexão';
-    if(wrap) wrap.innerHTML=`<p style="color:var(--red)">Erro: ${esc(e.message)}</p>`;
+    if(cdot) cdot.className='cdot warn';
+    if(clbl) clbl.textContent='⚠ Erro de conexão';
+    if(wrap) wrap.innerHTML=`<p style="color:var(--red)">Erro ao verificar: ${esc(e.message)}</p>`;
+    _showConnBanner('error');
   }
+}
+
+// Banner fixo de alerta de conexão
+function _showConnBanner(state) {
+  let banner = document.getElementById('conn-alert-banner');
+  if(!banner) {
+    banner = document.createElement('div');
+    banner.id = 'conn-alert-banner';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;padding:8px 16px;font-size:12px;font-weight:600;text-align:center;cursor:pointer;display:none';
+    banner.onclick = ()=>go('numero');
+    document.body.appendChild(banner);
+  }
+  if(state==='ok') {
+    banner.style.display='none';
+  } else if(state==='disconnected') {
+    banner.style.cssText += ';display:block;background:rgba(255,82,82,.9);color:#fff';
+    banner.textContent = '⚠️ WhatsApp desconectado! Clique aqui para reconectar → Meu Número → Gerar QR';
+  } else if(state==='noconfig') {
+    banner.style.cssText += ';display:block;background:rgba(255,171,64,.9);color:#000';
+    banner.textContent = '⚠️ Instância não configurada. Peça ao Master para configurar sua instância.';
+  } else {
+    banner.style.display='none';
+  }
+}
+
+// Verificar conexão automaticamente a cada 60s
+let _connCheckTimer = null;
+function startConnCheck() {
+  if(_connCheckTimer) return;
+  _connCheckTimer = setInterval(()=>{
+    checkNum();
+  }, 60000);
 }
 async function gerarQR() {
   const base=getApiBase();const key=getApiKey();const inst=getInst();
