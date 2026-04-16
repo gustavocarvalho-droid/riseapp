@@ -1661,27 +1661,30 @@ function getInst()   { return getCfg().inst||''; }
 async function carregarCfgDoBanco() {
   const userKey = currentUser?.key;
   if(!userKey) return;
-  // Só carregar do banco se não tem configuração local
-  const localCfg = JSON.parse(localStorage.getItem(getCfgKey())||'{}');
-  if(localCfg.inst) return; // já tem local, não sobrescrever
+
   try {
     const res = await fetch('/api/dados', {headers:{'x-user-key':'_cfg_'+userKey}});
     if(!res.ok) return;
     const d = await res.json();
     const inst = d.inst || d.extra?.inst;
     const url  = d.url  || d.extra?.url;
-    const key  = d.key  || d.extra?.key;
-    if(inst) {
-      const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
-      localStorage.setItem(getCfgKey(), JSON.stringify({
-        inst,
-        url: url || globalCfg.url || '',
-        key: key || globalCfg.key || ''
-      }));
-      console.log('[Cfg] Instância carregada do banco:', inst);
-      checkNum();
-    }
-  } catch(e) {}
+    const apikey = d.key || d.extra?.key;
+
+    if(!inst) return; // sem instância no banco
+
+    // Sempre atualizar a instância do banco (fonte da verdade)
+    const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+    const localCfg = JSON.parse(localStorage.getItem(getCfgKey())||'{}');
+    const newCfg = {
+      inst,
+      url: url || localCfg.url || globalCfg.url || '',
+      key: apikey || localCfg.key || globalCfg.key || ''
+    };
+    localStorage.setItem(getCfgKey(), JSON.stringify(newCfg));
+    console.log('[Cfg] Instância carregada do banco:', inst, '→ user:', userKey);
+  } catch(e) {
+    console.warn('[Cfg] Erro ao carregar instância do banco:', e);
+  }
 }
 
 // ── NAVIGATION ──
@@ -1783,7 +1786,8 @@ function iniciarApp() {
     if(cfgNav) cfgNav.style.display='none';
   }
   loadCfgToForm();
-  // Ensure user has URL+Key from global config
+
+  // Garantir URL+Key do config global
   const globalCfg2 = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
   if(globalCfg2.url||globalCfg2.key) {
     const userCfgCheck = JSON.parse(localStorage.getItem(CFG_KEY+'_'+(currentUser?.key||''))||'{}');
@@ -1793,16 +1797,26 @@ function iniciarApp() {
       }));
     }
   }
-  carregarDados().then(()=>{
-    startPolling();
-    startUsersPolling();
-    startDataSync();
-    carregarCfgDoBanco(); // carregar instância do banco se não tem local
-    renderC();
-    updBadges();
-    startAgTimer();
-    checkNum();
-    setTimeout(autoSetupWebhook, 3000);
+
+  // PRIMEIRO carregar cfg do banco (instância), DEPOIS iniciar app
+  carregarCfgDoBanco().then(()=>{
+    const inst = getInst();
+    const base = getApiBase();
+    console.log(`[Init] user=${currentUser?.key} inst=${inst} base=${base}`);
+    if(!inst) {
+      toast(`⚠️ Instância não configurada para ${u.name}. Peça ao Master para configurar em Configurações.`, 'warn');
+    }
+
+    carregarDados().then(()=>{
+      startPolling();
+      startUsersPolling();
+      startDataSync();
+      renderC();
+      updBadges();
+      startAgTimer();
+      checkNum();
+      setTimeout(autoSetupWebhook, 3000);
+    });
   });
 }
 (function autoLogin(){
