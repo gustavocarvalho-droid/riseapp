@@ -2834,41 +2834,56 @@ function renderFireQueue() {
 async function startFire() {
   if(!getFireMsg()){ toast('Escreva ou selecione uma mensagem primeiro','warn'); return; }
   const base=getApiBase();const key=getApiKey();const inst=getInst();
-  if(!base||!key||!inst){ toast('Configure a API primeiro','warn'); return; }
+  if(!base||!key||!inst){
+    toast('Configure a instância primeiro (Configurações → Instâncias por Usuário)','warn');
+    return;
+  }
 
-  // Verificar se a instância está conectada antes de disparar
+  // Verificar conexão — só bloquear se EXPLICITAMENTE desconectado
   try {
     const check = await fetch(`${base}/instance/fetchInstances`,{headers:{'apikey':key}});
     if(check.ok) {
       const d = await check.json();
       const arr = Array.isArray(d)?d:[d];
       const found = arr.find(i=>(i.instance?.instanceName||i.instanceName)===inst);
-      const st = found?.instance?.status||found?.status||'unknown';
-      if(st !== 'open' && st !== 'connected') {
-        toast(`⚠️ Instância "${inst}" está ${st}. Reconecte antes de disparar.`, 'err');
-        return;
+      if(found) {
+        const st = found?.instance?.status||found?.status||'open';
+        // Só bloquear se status for explicitamente fechado/desconectado
+        if(st === 'close' || st === 'closed' || st === 'logout') {
+          toast(`⚠️ Instância "${inst}" está desconectada. Reconecte em Meu Número.`, 'err');
+          return;
+        }
+        // Para qualquer outro status (open, connecting, qrcode, etc), continuar
       }
+      // Se não encontrou a instância, continuar mesmo assim (pode ser versão diferente da API)
     }
-  } catch(e) { /* se não conseguir verificar, continuar assim mesmo */ }
+  } catch(e) { /* erro na verificação — continuar disparo */ }
 
   // Parar disparo anterior se existir
   if(fireActive) {
     fireActive=false;
     clearTimeout(fireTimer);
+    await new Promise(r=>setTimeout(r,150)); // aguardar loop anterior encerrar
   }
 
   const list = getFireList();
-  if(!list.length){ toast('Nenhum contato no alvo','warn'); return; }
+  if(!list.length){ toast('Nenhum contato pendente no alvo','warn'); return; }
   const fireQty = getFireQty();
   const fireList = fireQty > 0 ? list.slice(0, fireQty) : list;
 
-  // Desduplicar por ID — nunca enviar para o mesmo contato duas vezes
-  const seen = new Set();
+  // Desduplicar por ID e por telefone
+  const seenId = new Set();
+  const seenTel2 = new Set();
   const deduped = fireList.filter(c => {
-    if(seen.has(c.id)) return false;
-    seen.add(c.id);
+    if(seenId.has(c.id)) return false;
+    const tel = (c.tel||'').replace(/\D/g,'');
+    if(seenTel2.has(tel)) return false;
+    seenId.add(c.id);
+    seenTel2.add(tel);
     return true;
   });
+
+  if(!deduped.length){ toast('Nenhum contato válido na fila','warn'); return; }
 
   fila = deduped.map(c=>c.id);
   filaIdx = 0;
@@ -2879,13 +2894,14 @@ async function startFire() {
   const listaBase = listaId ? (listas.find(l=>String(l.id)===listaId)?.nome||'Lista') : null;
   const listaNome = listaBase ? (tgt==='lista-pendentes' ? `Pendentes — ${listaBase}` : listaBase) : 'Todos pendentes';
   currentFireSession = { id: uid(), listaId, listaNome, startedAt: new Date().toLocaleString('pt-BR'), total: deduped.length };
-  fireSessionToken = currentFireSession.id; // ativar token da sessão
+  fireSessionToken = currentFireSession.id;
+
+  console.log(`[Fire] Iniciando: ${deduped.length} contatos, instância: ${inst}, sessão: ${fireSessionToken}`);
 
   document.getElementById('fire-btn').disabled = true;
   document.getElementById('fire-banner').style.display='block';
   updFireUI();
 
-  // Pequeno delay para garantir que qualquer loop anterior terminou
   setTimeout(fireNext, 100);
 }
 function stopFire() {
@@ -2953,7 +2969,6 @@ async function fireNext() {
     if(res.ok) {
       sucesso = true;
     } else {
-      // Capturar motivo do erro da resposta da API
       erroMotivo = respBody?.message
         || respBody?.error
         || respBody?.response?.message
@@ -2967,15 +2982,28 @@ async function fireNext() {
       if(erroLower.includes('not in whatsapp')
         || erroLower.includes('not a whatsapp')
         || erroLower.includes('does not exist')
-        || erroLower.includes('no exists')
-        || erroLower.includes('invalid')
-        || res.status===400) {
+        || erroLower.includes('no exists')) {
         erroMotivo = 'Não é WhatsApp';
-      } else if(erroLower.includes('disconnected') || erroLower.includes('desconect')) {
+      } else if(erroLower.includes('disconnected') || erroLower.includes('desconect')
+        || erroLower.includes('logout') || erroLower.includes('close')) {
         erroMotivo = 'Instância desconectada';
+        // Se instância desconectou, parar o disparo inteiro
+        if(fireActive) {
+          fireActive = false;
+          fireSessionToken = null;
+          clearTimeout(fireTimer);
+          document.getElementById('fire-btn').disabled=false;
+          document.getElementById('fire-banner').style.display='none';
+          toast('⚠️ Instância desconectada durante o disparo. Reconecte em Meu Número.', 'err');
+          await salvarImediato();
+        }
       } else if(erroLower.includes('timeout') || erroLower.includes('timed out')) {
         erroMotivo = 'Timeout';
+      } else if(erroLower.includes('invalid') && res.status===400) {
+        // 400 com "invalid" = número inválido mesmo
+        erroMotivo = 'Não é WhatsApp';
       }
+      // HTTP 400 genérico sem mensagem clara = erro na API, não no número
     }
   } catch(e) {
     erroMotivo = e.message || 'Erro de conexão';
