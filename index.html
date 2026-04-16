@@ -1584,39 +1584,48 @@ function getUsers() {
 }
 function saveUsers(u) {
   localStorage.setItem('rise_users', JSON.stringify(u));
-  // Salvar no banco para sincronizar entre dispositivos/usuários
+  // Salvar no banco — campo 'users' vai para coluna 'extra' via backend
   fetch('/api/dados', {
     method:'POST',
     headers:{'Content-Type':'application/json','x-user-key':'_system_users'},
-    body: JSON.stringify({users: u})
-  }).then(r=>{ if(!r.ok) console.warn('saveUsers banco falhou:', r.status); })
-    .catch(e=>console.warn('saveUsers banco erro:', e));
+    body: JSON.stringify({ users: u })
+  }).then(r=>{
+    if(!r.ok) console.warn('[Users] saveUsers banco falhou:', r.status);
+    else console.log('[Users] Salvos no banco:', Object.keys(u).length, 'usuarios');
+  }).catch(e=>console.warn('[Users] saveUsers erro:', e));
 }
 
-// Carregar usuários do banco — sempre mesclar com os locais
+// Carregar usuarios do banco — remoto tem prioridade
 async function carregarUsuariosDoBanco() {
   try {
     const res = await fetch('/api/dados', {headers:{'x-user-key':'_system_users'}});
     if(!res.ok) return;
     const d = await res.json();
     const usersRemoto = d.users;
-    if(!usersRemoto || typeof usersRemoto !== 'object') return;
-
-    // Mesclar: usuários remotos + locais (sem perder nenhum)
-    const usersLocal = getUsers();
-    const merged = {...usersLocal};
-    Object.entries(usersRemoto).forEach(([k,u]) => {
-      if(!merged[k]) merged[k] = u; // adicionar novos do remoto
-      // Se existe nos dois, o remoto tem prioridade (é a versão mais atualizada)
-      else merged[k] = u;
-    });
-
-    localStorage.setItem('rise_users', JSON.stringify(merged));
+    if(!usersRemoto || typeof usersRemoto !== 'object' || !Object.keys(usersRemoto).length) return;
+    localStorage.setItem('rise_users', JSON.stringify(usersRemoto));
     renderLoginUsers();
-    console.log('[Users] Carregados do banco:', Object.keys(merged).length, 'usuários');
+    console.log('[Users] Sincronizados do banco:', Object.keys(usersRemoto).length, 'usuarios');
   } catch(e) {
     console.warn('[Users] Erro ao carregar do banco:', e);
   }
+}
+
+// Polling de usuarios — atualiza a lista a cada 30s
+let _usersPollTimer = null;
+function startUsersPolling() {
+  if(_usersPollTimer) return;
+  _usersPollTimer = setInterval(async () => {
+    const antes = JSON.stringify(getUsers());
+    await carregarUsuariosDoBanco();
+    const depois = JSON.stringify(getUsers());
+    if(antes !== depois) {
+      console.log('[Users] Lista atualizada via polling');
+      const loginScreen = document.getElementById('login-screen');
+      if(loginScreen && loginScreen.style.display !== 'none') renderLoginUsers();
+      if(currentUser) renderConfig();
+    }
+  }, 30000);
 }
 
 // ── CONFIG ──
@@ -1750,11 +1759,12 @@ function iniciarApp() {
   }
   carregarDados().then(()=>{
     startPolling();
+    startUsersPolling(); // usuários a cada 30s
+    startDataSync();     // dados (logs, contatos) a cada 20s
     renderC();
     updBadges();
     startAgTimer();
     checkNum();
-    // Auto-configurar webhook silenciosamente
     setTimeout(autoSetupWebhook, 3000);
   });
 }
@@ -4822,12 +4832,74 @@ function receberMensagem(data) {
 
 // Polling de mensagens (alternativa ao webhook)
 let pollTimer = null;
-let lastPollTs = Date.now() - 60000; // Começa 60s atrás para pegar mensagens recentes
+let lastPollTs = Date.now() - 60000;
 let processedMsgIds = new Set();
+
+// ── SYNC DE DADOS ENTRE COMPUTADORES ──
+let _lastSyncedAt = null; // timestamp do último dado carregado do banco
+let _dataSyncTimer = null;
+
+async function startDataSync() {
+  if(_dataSyncTimer) return;
+  // Verificar mudanças no banco a cada 20 segundos
+  _dataSyncTimer = setInterval(syncDadosBanco, 20000);
+}
+
+async function syncDadosBanco() {
+  // Não sincronizar se há um disparo ativo (para não interferir)
+  if(fireActive) return;
+  // Não sincronizar se está salvando
+  if(_isSaving) return;
+
+  const userKey = currentUser?.key || 'shared';
+  try {
+    const res = await fetch('/api/dados', { headers:{'x-user-key': userKey} });
+    if(!res.ok) return;
+    const d = await res.json();
+
+    // Mesclar logs novos do banco com os locais
+    const logsNovos = (d.logs||[]).filter(l => !logs.find(x=>x.id===l.id));
+    if(logsNovos.length > 0) {
+      console.log(`[Sync] ${logsNovos.length} logs novos do banco`);
+      logs = mergeLogs(logs, d.logs||[]);
+      backupLogsLocal();
+      // Atualizar relatório se estiver aberto
+      if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
+      if(document.getElementById('panel-historicodisparos')?.classList.contains('show')) renderHistoricoDisparos();
+      updBadges();
+    }
+
+    // Sincronizar contatos: mesclar novos sem sobrescrever os locais
+    const contatosNovos = (d.contacts||[]).filter(c => !contacts.find(x=>x.id===c.id));
+    if(contatosNovos.length > 0) {
+      console.log(`[Sync] ${contatosNovos.length} contatos novos do banco`);
+      contacts = [...contacts, ...contatosNovos];
+      if(document.getElementById('panel-contatos')?.classList.contains('show')) renderC();
+      updBadges();
+    }
+
+    // Atualizar status de contatos que mudaram em outro computador
+    let statusMudou = false;
+    (d.contacts||[]).forEach(remoto => {
+      const local = contacts.find(c=>c.id===remoto.id);
+      if(local && local.status !== remoto.status) {
+        local.status = remoto.status;
+        statusMudou = true;
+      }
+    });
+    if(statusMudou) {
+      if(document.getElementById('panel-contatos')?.classList.contains('show')) renderC();
+      updBadges();
+    }
+
+  } catch(e) {
+    // Silencioso — sync em background
+  }
+}
 
 async function startPolling() {
   if(pollTimer) return;
-  // Poll a cada 8 segundos
+  // Poll de mensagens WhatsApp a cada 8 segundos
   pollTimer = setInterval(pollMessages, 8000);
 }
 
