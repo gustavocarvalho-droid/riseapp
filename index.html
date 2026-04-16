@@ -1634,19 +1634,55 @@ function getCfgKey() {
 }
 function getCfg() {
   try {
-    // Primeiro tenta config do usuário atual, fallback para config global
     const userCfg = JSON.parse(localStorage.getItem(getCfgKey()));
     if(userCfg && (userCfg.url||userCfg.inst)) return userCfg;
+    // Fallback para config global
     return JSON.parse(localStorage.getItem(CFG_KEY)) || {};
   }
   catch(e) { return {}; }
 }
 function saveCfgLocal(c) {
   localStorage.setItem(getCfgKey(), JSON.stringify(c));
+  // Salvar instância no banco para sincronizar entre computadores
+  const userKey = currentUser?.key;
+  if(userKey && c.inst) {
+    fetch('/api/dados', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-user-key':'_cfg_'+userKey},
+      body: JSON.stringify({ inst: c.inst, url: c.url||'', key: c.key||'' })
+    }).catch(()=>{});
+  }
 }
 function getApiBase(){ return (getCfg().url||'').replace(/\/$/,''); }
 function getApiKey() { return getCfg().key||''; }
 function getInst()   { return getCfg().inst||''; }
+
+// Carregar configuração de instância do banco (para outros computadores)
+async function carregarCfgDoBanco() {
+  const userKey = currentUser?.key;
+  if(!userKey) return;
+  // Só carregar do banco se não tem configuração local
+  const localCfg = JSON.parse(localStorage.getItem(getCfgKey())||'{}');
+  if(localCfg.inst) return; // já tem local, não sobrescrever
+  try {
+    const res = await fetch('/api/dados', {headers:{'x-user-key':'_cfg_'+userKey}});
+    if(!res.ok) return;
+    const d = await res.json();
+    const inst = d.inst || d.extra?.inst;
+    const url  = d.url  || d.extra?.url;
+    const key  = d.key  || d.extra?.key;
+    if(inst) {
+      const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+      localStorage.setItem(getCfgKey(), JSON.stringify({
+        inst,
+        url: url || globalCfg.url || '',
+        key: key || globalCfg.key || ''
+      }));
+      console.log('[Cfg] Instância carregada do banco:', inst);
+      checkNum();
+    }
+  } catch(e) {}
+}
 
 // ── NAVIGATION ──
 function go(tab) {
@@ -1759,8 +1795,9 @@ function iniciarApp() {
   }
   carregarDados().then(()=>{
     startPolling();
-    startUsersPolling(); // usuários a cada 30s
-    startDataSync();     // dados (logs, contatos) a cada 20s
+    startUsersPolling();
+    startDataSync();
+    carregarCfgDoBanco(); // carregar instância do banco se não tem local
     renderC();
     updBadges();
     startAgTimer();
@@ -1800,10 +1837,16 @@ let _pendingSave = false;
 function backupLogsLocal() {
   try {
     const key = 'rise_logs_backup_' + (currentUser?.key||'shared');
-    // Manter apenas os 500 logs mais recentes no backup local
-    const toSave = logs.slice(0, 500);
+    // Guardar os 2000 logs mais recentes no backup local
+    const toSave = logs.slice(0, 2000);
     localStorage.setItem(key, JSON.stringify(toSave));
-  } catch(e) {}
+  } catch(e) {
+    // Se der quota error, tentar com menos
+    try {
+      const key = 'rise_logs_backup_' + (currentUser?.key||'shared');
+      localStorage.setItem(key, JSON.stringify(logs.slice(0, 500)));
+    } catch(e2) {}
+  }
 }
 function restoreLogsLocal() {
   try {
@@ -3877,9 +3920,17 @@ function _saveUserInst(userKey) {
     inst: inst||''
   };
   localStorage.setItem(CFG_KEY+'_'+userKey, JSON.stringify(userCfg));
+
+  // Salvar no banco para sincronizar em outros computadores
+  fetch('/api/dados', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-user-key':'_cfg_'+userKey},
+    body: JSON.stringify({ inst: inst||'', url: globalCfg.url||'', key: globalCfg.key||'' })
+  }).then(r=>{ if(r.ok) console.log('[Cfg] Instância salva no banco para', userKey); })
+    .catch(()=>{});
+
   closeModal();
   renderConfig();
-  // Se for o usuário atual, atualizar status
   if(userKey===currentUser?.key) {
     toast(`Instância atualizada: ${inst}`);
     checkNum();
@@ -4482,6 +4533,14 @@ function renderHistoricoDisparos() {
       </div>
     </div>`;
   }).join('');
+}
+
+function toggleHDSection(id) {
+  const el = document.getElementById(id);
+  if(!el) return;
+  const isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'block';
+  if(!isOpen) setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
 }
 
 function expDia(day) {
