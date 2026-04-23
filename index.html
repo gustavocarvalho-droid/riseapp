@@ -149,7 +149,8 @@ nav{flex:1;padding:8px 10px;overflow-y:auto}
 
 /* ── PANELS ── */
 #content{flex:1;overflow-y:auto;overflow-x:hidden}
-.panel{display:none;padding:20px;max-width:1200px;margin:0 auto}
+.panel{display:none;padding:20px;max-width:1200px;margin:0 auto;contain:layout style}
+.panel.show{display:block;will-change:auto}
 .panel.show{display:block}
 
 /* ── GRID / LAYOUT HELPERS ── */
@@ -814,7 +815,7 @@ input[type=range]::-moz-range-thumb{
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
           <div class="search-bar" style="flex:1;min-width:200px;margin-bottom:0">
             <span class="search-icon">🔍</span>
-            <input type="text" id="ct-search" placeholder="Buscar por nome, telefone, empresa..." oninput="renderC()">
+            <input type="text" id="ct-search" placeholder="Buscar por nome, telefone, empresa..." oninput="debouncedRenderC()">
           </div>
           <select id="ct-status" style="width:auto;min-width:140px" onchange="renderC()">
             <option value="">Todos status</option>
@@ -881,7 +882,7 @@ input[type=range]::-moz-range-thumb{
           <div class="contacts-list-header">
             <div class="search-bar" style="margin-bottom:8px">
               <span class="search-icon">🔍</span>
-              <input type="text" id="chat-search" placeholder="Buscar contato..." oninput="renderChatList()">
+              <input type="text" id="chat-search" placeholder="Buscar contato..." oninput="debouncedRenderChatList()">
             </div>
             <div style="display:flex;gap:4px;padding:0 2px">
               <button id="chat-tab-historico" class="btn btn-xs btn-primary" style="flex:1;justify-content:center;font-size:11px" onclick="setChatTab('historico')">💬 Histórico</button>
@@ -1253,7 +1254,7 @@ input[type=range]::-moz-range-thumb{
       <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
         <div class="search-bar" style="flex:1;min-width:200px;margin-bottom:0">
           <span class="search-icon">🔍</span>
-          <input type="text" id="crm-search" placeholder="Buscar no CRM..." oninput="renderCRM()">
+          <input type="text" id="crm-search" placeholder="Buscar no CRM..." oninput="debouncedRenderCRM()">
         </div>
         <select id="crm-col-filter" style="width:auto;min-width:160px" onchange="renderCRM()">
           <option value="">Todas as colunas</option>
@@ -1511,6 +1512,54 @@ function setChatTab(tab) {
 } // Contatos que iniciaram conversa mas não estão na lista
 let ctPage = 0;
 const CT_PER_PAGE = 50;
+
+// ── PERFORMANCE: Debounce genérico ──
+function debounce(fn, ms) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(()=>fn(...a), ms); };
+}
+const debouncedRenderC        = debounce(()=>renderC(), 180);
+const debouncedRenderChatList = debounce(()=>renderChatList(), 180);
+const debouncedRenderCRM      = debounce(()=>renderCRM(), 180);
+const debouncedRenderLogs     = debounce(()=>renderLogs(), 200);
+
+// Cache do lastDisparoMap — reconstruir só quando logs mudam
+let _lastDisparoMapCache = null;
+let _lastDisparoLogCount = -1;
+function getLastDisparoMap() {
+  if(_lastDisparoMapCache && _lastDisparoLogCount === logs.length) return _lastDisparoMapCache;
+  const map = {};
+  logs.forEach(l => {
+    const tel = (l.tel||'').replace(/\D/g,'');
+    if(!map[tel] || l.time > map[tel]) map[tel] = l.time;
+  });
+  _lastDisparoMapCache = map;
+  _lastDisparoLogCount = logs.length;
+  return map;
+}
+function invalidateDisparoCache() { _lastDisparoLogCount = -1; }
+
+// Cache de buildFilters — só reconstruir quando contacts/listas mudam
+let _filterCacheKey = '';
+function buildFilters() {
+  const key = `${contacts.length}|${listas.length}`;
+  if(key === _filterCacheKey) return; // sem mudança, pular
+  _filterCacheKey = key;
+  const cidades = [...new Set(contacts.map(c=>c.cidade||'').filter(Boolean))].sort();
+  const cc = document.getElementById('ct-cidade');
+  if(cc) {
+    const cur = cc.value;
+    cc.innerHTML = '<option value="">Todas cidades</option>';
+    cidades.forEach(c=>{ const o=document.createElement('option');o.value=c;o.textContent=c;cc.appendChild(o); });
+    cc.value = cur;
+  }
+  const cl = document.getElementById('ct-lista');
+  if(cl) {
+    const curl = cl.value;
+    cl.innerHTML = '<option value="">Todas listas</option>';
+    listas.forEach(l=>{ const o=document.createElement('option');o.value=l.id;o.textContent=l.nome;cl.appendChild(o); });
+    cl.value = curl;
+  }
+}
 let agTimer = null;
 
 // ── UTILS (declaradas cedo para uso no login) ──
@@ -1888,13 +1937,14 @@ function mergeLogs(a, b) {
 }
 
 function salvarDados() {
-  backupLogsLocal(); // sempre salvar backup local primeiro
+  invalidateDisparoCache(); // invalidar cache do mapa de disparo
+  backupLogsLocal();
   if(fireActive) {
     _pendingSave = true;
     if(!_isSaving) _flushSave();
   } else {
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(()=>{ _pendingSave=true; _flushSave(); }, 1500);
+    saveTimeout = setTimeout(()=>{ _pendingSave=true; _flushSave(); }, 2000); // 2s debounce
   }
 }
 
@@ -2135,19 +2185,6 @@ function updBadges() {
 }
 
 // ── CONTATOS ──
-function buildFilters() {
-  const cidades = [...new Set(contacts.map(c=>c.cidade||'').filter(Boolean))].sort();
-  const cc = document.getElementById('ct-cidade');
-  const cur = cc.value;
-  cc.innerHTML = '<option value="">Todas cidades</option>';
-  cidades.forEach(c=>{ const o=document.createElement('option');o.value=c;o.textContent=c;cc.appendChild(o); });
-  cc.value = cur;
-  const cl = document.getElementById('ct-lista');
-  const curl = cl.value;
-  cl.innerHTML = '<option value="">Todas listas</option>';
-  listas.forEach(l=>{ const o=document.createElement('option');o.value=l.id;o.textContent=l.nome;cl.appendChild(o); });
-  cl.value = curl;
-}
 
 function renderC() {
   buildFilters();
@@ -2160,14 +2197,8 @@ function renderC() {
 
   const listaIds = lst ? (listas.find(l=>String(l.id)===lst)||{contatos:[]}).contatos : null;
 
-  // Mapa de último disparo por tel
-  const lastDisparoMap = {};
-  logs.forEach(l => {
-    const tel = (l.tel||'').replace(/\D/g,'');
-    if(!lastDisparoMap[tel] || l.time > lastDisparoMap[tel]) {
-      lastDisparoMap[tel] = l.time;
-    }
-  });
+  // Usar cache do mapa de disparo
+  const lastDisparoMap = getLastDisparoMap();
 
   // Helper de datas para filtro de disparo
   const now = new Date();
@@ -5093,76 +5124,65 @@ let _dataSyncTimer = null;
 
 async function startDataSync() {
   if(_dataSyncTimer) return;
-  // Verificar mudanças no banco a cada 20 segundos
-  _dataSyncTimer = setInterval(syncDadosBanco, 20000);
+  // Sync a cada 30s (era 20s) — reduz carga no banco
+  _dataSyncTimer = setInterval(syncDadosBanco, 30000);
 }
 
 async function syncDadosBanco() {
-  // Não sincronizar se há um disparo ativo (para não interferir)
-  if(fireActive) return;
-  // Não sincronizar se está salvando
-  if(_isSaving) return;
-
+  if(fireActive || _isSaving) return;
+  if(document.hidden) return; // aba em segundo plano — pular
   const userKey = currentUser?.key || 'shared';
   try {
     const res = await fetch('/api/dados', { headers:{'x-user-key': userKey} });
     if(!res.ok) return;
     const d = await res.json();
 
-    // Mesclar logs novos do banco com os locais
+    // Logs novos
     const logsNovos = (d.logs||[]).filter(l => !logs.find(x=>x.id===l.id));
     if(logsNovos.length > 0) {
-      console.log(`[Sync] ${logsNovos.length} logs novos do banco`);
       logs = mergeLogs(logs, d.logs||[]);
+      invalidateDisparoCache();
       backupLogsLocal();
-      // Atualizar relatório se estiver aberto
       if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
       if(document.getElementById('panel-historicodisparos')?.classList.contains('show')) renderHistoricoDisparos();
       updBadges();
     }
 
-    // Sincronizar contatos: mesclar novos sem sobrescrever os locais
+    // Contatos novos
     const contatosNovos = (d.contacts||[]).filter(c => !contacts.find(x=>x.id===c.id));
     if(contatosNovos.length > 0) {
-      console.log(`[Sync] ${contatosNovos.length} contatos novos do banco`);
       contacts = [...contacts, ...contatosNovos];
+      _filterCacheKey = '';
       if(document.getElementById('panel-contatos')?.classList.contains('show')) renderC();
       updBadges();
     }
 
-    // Atualizar status de contatos que mudaram em outro computador
-    // REGRA: nunca fazer downgrade de status (enviado/falha → pendente não pode)
+    // Status — nunca downgrade
     const prioridade = { 'enviado': 3, 'falha': 2, 'pendente': 1, '': 0 };
     let statusMudou = false;
     (d.contacts||[]).forEach(remoto => {
       const local = contacts.find(c=>c.id===remoto.id);
       if(local && local.status !== remoto.status) {
-        const prioLocal  = prioridade[local.status]  || 0;
-        const prioRemoto = prioridade[remoto.status] || 0;
-        // Só atualizar se o remoto for de prioridade MAIOR (nunca downgrade)
-        if(prioRemoto > prioLocal) {
+        if((prioridade[remoto.status]||0) > (prioridade[local.status]||0)) {
           local.status = remoto.status;
           statusMudou = true;
         }
       }
     });
-    if(statusMudou) {
-      if(document.getElementById('panel-contatos')?.classList.contains('show')) renderC();
-      updBadges();
+    if(statusMudou && document.getElementById('panel-contatos')?.classList.contains('show')) {
+      renderC(); updBadges();
     }
-
-  } catch(e) {
-    // Silencioso — sync em background
-  }
+  } catch(e) { /* silencioso */ }
 }
 
 async function startPolling() {
   if(pollTimer) return;
-  // Poll de mensagens WhatsApp a cada 8 segundos
-  pollTimer = setInterval(pollMessages, 8000);
+  // Poll de mensagens a cada 12s (era 8s) — menos pressão na API
+  pollTimer = setInterval(pollMessages, 12000);
 }
 
 async function pollMessages() {
+  if(document.hidden) return; // não consumir recursos em segundo plano
   const base=getApiBase();const key=getApiKey();const inst=getInst();
   if(!base||!key||!inst) return;
 
