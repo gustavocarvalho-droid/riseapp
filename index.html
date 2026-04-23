@@ -3771,23 +3771,84 @@ function expLogs() {
   a.download='logs_rise.csv'; a.click();
 }
 function limparLogs() {
-  const isMaster = currentUser?.master;
   showModal(`
-    <div class="modal-title">🗑 Limpar logs</div>
-    <p class="modal-sub">${isMaster ? 'Apagar apenas os seus próprios registros de envio?' : 'Apagar todos os registros de envio?'}</p>
+    <div class="modal-title">🗑 Limpar Logs</div>
+    <p class="modal-sub">Selecione o período que deseja apagar:</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+      <button class="btn btn-sm" style="justify-content:flex-start;gap:10px" onclick="_doLimparLogs('today')">
+        📅 <span>Hoje</span>
+      </button>
+      <button class="btn btn-sm" style="justify-content:flex-start;gap:10px" onclick="_doLimparLogs('15days')">
+        📅 <span>Últimos 15 dias</span>
+      </button>
+      <button class="btn btn-sm" style="justify-content:flex-start;gap:10px" onclick="_doLimparLogs('month')">
+        📅 <span>Mês atual</span>
+      </button>
+      <button class="btn btn-sm" style="justify-content:flex-start;gap:10px" onclick="_doLimparLogs('lastmonth')">
+        📅 <span>Mês passado</span>
+      </button>
+      <button class="btn btn-danger btn-sm" style="justify-content:flex-start;gap:10px" onclick="_doLimparLogs('all')">
+        🗑 <span>Todo o histórico</span>
+      </button>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-danger btn-sm" onclick="_doLimparLogs()">Confirmar</button>
     </div>
   `);
 }
-function _doLimparLogs() {
-  logs=[];
-  // Remover do allLogs os logs próprios
-  if(currentUser?.master) {
-    allLogs = allLogs.filter(l=>l._owner && l._owner !== currentUser.name);
+function _doLimparLogs(periodo) {
+  const now = new Date();
+  let cutoff = null;
+  let label = '';
+
+  if(periodo === 'today') {
+    const hoje = now.toLocaleDateString('pt-BR');
+    logs = logs.filter(l => !(l.time||'').startsWith(hoje));
+    label = 'de hoje';
+  } else if(periodo === '15days') {
+    cutoff = new Date(now - 15*24*3600*1000);
+    label = 'dos últimos 15 dias';
+  } else if(periodo === 'month') {
+    const mes = `${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()}`;
+    logs = logs.filter(l => {
+      const parts = (l.time||'').split('/');
+      return !(parts.length >= 3 && `${parts[1]}/${parts[2]?.slice(0,4)}` === mes);
+    });
+    label = 'do mês atual';
+  } else if(periodo === 'lastmonth') {
+    const d = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    const mes = `${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    logs = logs.filter(l => {
+      const parts = (l.time||'').split('/');
+      return !(parts.length >= 3 && `${parts[1]}/${parts[2]?.slice(0,4)}` === mes);
+    });
+    label = 'do mês passado';
+  } else {
+    logs = [];
+    if(currentUser?.master) allLogs = allLogs.filter(l=>l._owner && l._owner !== currentUser.name);
+    label = 'completo';
   }
-  salvarDados(); renderLogs(); closeModal(); toast('Logs apagados');
+
+  // Para corte por data
+  if(cutoff) {
+    logs = logs.filter(l => {
+      if(!l.time) return true;
+      // Formato: "dd/mm/yyyy, hh:mm:ss"
+      const parts = l.time.split(/[/,\s:]+/);
+      if(parts.length < 3) return true;
+      try {
+        const d = new Date(+parts[2], +parts[1]-1, +parts[0]);
+        return d >= cutoff;
+      } catch(e) { return true; }
+    });
+  }
+
+  backupLogsLocal();
+  salvarImediato();
+  renderLogs();
+  updBadges();
+  closeModal();
+  toast(`✅ Histórico ${label} apagado`);
 }
 
 // ── NÚMERO ──
@@ -5070,12 +5131,19 @@ async function syncDadosBanco() {
     }
 
     // Atualizar status de contatos que mudaram em outro computador
+    // REGRA: nunca fazer downgrade de status (enviado/falha → pendente não pode)
+    const prioridade = { 'enviado': 3, 'falha': 2, 'pendente': 1, '': 0 };
     let statusMudou = false;
     (d.contacts||[]).forEach(remoto => {
       const local = contacts.find(c=>c.id===remoto.id);
       if(local && local.status !== remoto.status) {
-        local.status = remoto.status;
-        statusMudou = true;
+        const prioLocal  = prioridade[local.status]  || 0;
+        const prioRemoto = prioridade[remoto.status] || 0;
+        // Só atualizar se o remoto for de prioridade MAIOR (nunca downgrade)
+        if(prioRemoto > prioLocal) {
+          local.status = remoto.status;
+          statusMudou = true;
+        }
       }
     });
     if(statusMudou) {
