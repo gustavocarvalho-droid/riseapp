@@ -1936,15 +1936,29 @@ function mergeLogs(a, b) {
   return Object.values(map).sort((x,y)=>(y.time||'').localeCompare(x.time||''));
 }
 
+let _fireLogsSinceLastSave = 0; // contador de logs desde último save durante disparo
+
 function salvarDados() {
-  invalidateDisparoCache(); // invalidar cache do mapa de disparo
-  backupLogsLocal();
+  invalidateDisparoCache();
+  backupLogsLocal(); // SEMPRE salvar local primeiro — nunca perder
   if(fireActive) {
-    _pendingSave = true;
-    if(!_isSaving) _flushSave();
+    _fireLogsSinceLastSave++;
+    // Durante disparo: salvar no banco a cada 5 envios
+    if(_fireLogsSinceLastSave >= 5) {
+      _fireLogsSinceLastSave = 0;
+      _pendingSave = true;
+      if(!_isSaving) _flushSave();
+    }
+    // Se não está salvando ainda, garantir que vai salvar
+    if(!_isSaving && !saveTimeout) {
+      _pendingSave = true;
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(()=>{ saveTimeout=null; _pendingSave=true; _flushSave(); }, 5000);
+    }
   } else {
+    _fireLogsSinceLastSave = 0;
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(()=>{ _pendingSave=true; _flushSave(); }, 2000); // 2s debounce
+    saveTimeout = setTimeout(()=>{ saveTimeout=null; _pendingSave=true; _flushSave(); }, 2000);
   }
 }
 
@@ -1956,7 +1970,12 @@ function _flushSave() {
 
 async function salvarImediato() {
   backupLogsLocal();
-  while(_isSaving) await new Promise(r=>setTimeout(r,100));
+  // Aguardar save em andamento terminar (máx 5s)
+  let waited = 0;
+  while(_isSaving && waited < 5000) {
+    await new Promise(r=>setTimeout(r,100));
+    waited += 100;
+  }
   await _saveNeon();
 }
 
@@ -2015,70 +2034,77 @@ async function _saveNeon() {
 }
 async function carregarDados() {
   const userKey = currentUser?.key || 'shared';
+
+  // PASSO 1: Restaurar backup local IMEDIATAMENTE (antes de qualquer fetch)
+  // Garante que o usuário nunca vê tela vazia
+  const logsLocal = restoreLogsLocal();
+  if(logsLocal.length > 0) {
+    logs = mergeLogs(logs, logsLocal);
+    invalidateDisparoCache();
+    updBadges();
+  }
+
   try {
     const res = await fetch('/api/dados', { headers:{'x-user-key': userKey} });
     let d = res.ok ? await res.json() : {};
     if(!d) d = {};
 
-    console.log('[Load] user=' + userKey + ' logs=' + (d.logs?.length||0) + ' contacts=' + (d.contacts?.length||0));
+    const logsBanco = d.logs || [];
+    console.log('[Load] banco=' + logsBanco.length + ' local=' + logsLocal.length + ' user=' + userKey);
 
-    // Migração: se não tem nada, buscar do shared (versão antiga)
-    if(!(d.logs?.length > 0) && !(d.contacts?.length > 0)) {
+    // PASSO 2: Migração do shared (só se banco vazio)
+    if(!logsBanco.length && !(d.contacts?.length)) {
       try {
-        const resShared = await fetch('/api/dados', { headers:{'x-user-key':'shared'} });
-        if(resShared.ok) {
-          const shared = await resShared.json();
+        const rs = await fetch('/api/dados', { headers:{'x-user-key':'shared'} });
+        if(rs.ok) {
+          const shared = await rs.json();
           if(shared.contacts?.length || shared.logs?.length) {
-            d = {
-              contacts: shared.contacts||[],
-              listas: shared.listas||[],
-              logs: shared.logs||[],
-              crm: shared.crm||[],
-              agendamentos: shared.agendamentos||[],
-              savedmsg: shared.savedmsg||'',
-              config: shared.config||{},
-              chatLogs: shared.chatLogs||{},
-              crmCustomCols: shared.crmCustomCols||[]
-            };
-            toast('Dados migrados com sucesso!');
-            setTimeout(()=>salvarImediato(), 500);
+            d = {...shared};
+            toast('Dados migrados!');
+            setTimeout(()=>salvarImediato(), 800);
           }
         }
-      } catch(e){ console.warn('Migracao shared falhou:', e); }
+      } catch(e){}
     }
 
-    contacts = d.contacts||[];
-    listas = d.listas||[];
-    crmData = d.crm||[];
-    fila = d.fila||[];
-    agendamentos = d.agendamentos||[];
-    savedMsg = d.savedmsg||'';
+    // PASSO 3: Aplicar dados do banco
+    if(d.contacts?.length) contacts = d.contacts;
+    if(d.listas?.length) listas = d.listas;
+    if(d.crm?.length) crmData = d.crm;
+    if(d.fila) fila = d.fila;
+    if(d.agendamentos?.length) agendamentos = d.agendamentos;
+    if(d.savedmsg) savedMsg = d.savedmsg;
     if(d.config?.tpls) tpls = d.config.tpls;
-    if(d.chatLogs) chatLogs = d.chatLogs;
-    if(d.crmCustomCols) crmCustomCols = d.crmCustomCols;
+    if(d.chatLogs && Object.keys(d.chatLogs).length) chatLogs = d.chatLogs;
+    if(d.crmCustomCols?.length) crmCustomCols = d.crmCustomCols;
 
-    // Mesclar logs do banco com backup local
-    const logsLocal = restoreLogsLocal();
-    logs = mergeLogs(d.logs||[], logsLocal);
+    // PASSO 4: Merge definitivo de logs — banco + local (nunca perder nenhum)
+    const logsBancoArr = d.logs || [];
+    logs = mergeLogs(logsBancoArr, logsLocal);
+    invalidateDisparoCache();
+    _filterCacheKey = '';
+
+    console.log('[Load] Logs finais: ' + logs.length + ' (banco:' + logsBancoArr.length + ' local:' + logsLocal.length + ')');
+
+    // PASSO 5: Atualizar backup local com todos os logs mesclados
     backupLogsLocal();
-    console.log('[Load] Logs finais: ' + logs.length);
 
-    // Se local tinha mais, salvar de volta
-    if(logs.length > (d.logs?.length||0)) {
-      setTimeout(()=>salvarImediato(), 600);
+    // PASSO 6: Se tem logs que o banco não tinha, salvar de volta (recuperação)
+    if(logs.length > logsBancoArr.length) {
+      const extras = logs.length - logsBancoArr.length;
+      console.log('[Load] Recuperando ' + extras + ' logs para o banco...');
+      setTimeout(()=>salvarImediato(), 1000);
     }
 
     renderC(); renderListas(); updBadges(); renderAgendamentos();
     loadAllChats();
     if(currentUser?.master) await carregarLogsGlobais();
+
   } catch(e) {
-    console.warn('[Load] Erro:', e);
-    const logsLocal = restoreLogsLocal();
-    if(logsLocal.length > 0) {
-      logs = mergeLogs(logs, logsLocal);
-      toast('Banco indisponivel. Dados locais restaurados.','warn');
-      renderC(); updBadges();
-    }
+    console.warn('[Load] Erro no banco:', e.message);
+    // Banco falhou mas já temos os logs locais carregados no passo 1
+    toast('⚠ Banco temporariamente indisponível. Dados locais carregados.','warn');
+    renderC(); renderListas(); updBadges();
   }
 }
 // Migração manual — força importar tudo do shared para o usuário atual
@@ -2424,7 +2450,23 @@ function processFile(file, listaId) {
       const vals = Object.values(row).map(v=>String(v).toLowerCase());
       return !vals.some(v=>v.startsWith('ex:')||v.includes('deixe vazio'));
     });
-    let added=0, dup=0;
+
+    // Montar mapa de logs por telefone (para cruzamento)
+    const logMap = {}; // tel → { status, time, msg }
+    logs.forEach(l => {
+      const tel = (l.tel||'').replace(/\D/g,'');
+      if(!tel) return;
+      if(!logMap[tel] || l.time > logMap[tel].time) {
+        logMap[tel] = { status: l.status, time: l.time, msg: l.msg||'' };
+      }
+    });
+    const getLogStatus = (tel) => {
+      const t = tel.replace(/\D/g,'');
+      return logMap[t] || logMap[t.replace(/^55/,'')] || logMap['55'+t] || null;
+    };
+
+    let added=0, dup=0, jaEnviado=0, atualizado=0;
+
     data.forEach((row,i)=>{
       const keys = Object.keys(row).map(k=>k.toLowerCase());
       const gv = (...names) => {
@@ -2438,8 +2480,26 @@ function processFile(file, listaId) {
       if(!tel) return;
       if(tel.length===10||tel.length===11) tel='55'+tel;
       if(tel.length<10) return;
+
+      const logInfo = getLogStatus(tel);
+      const statusFinal = logInfo?.status === 'enviado' ? 'enviado'
+                        : logInfo?.status === 'falha'   ? 'falha'
+                        : 'pendente';
+
       const existe = contacts.find(c=>c.tel===tel);
-      if(existe){ dup++; return; }
+      if(existe) {
+        // Contato duplicado — atualizar status se necessário
+        const prioridade = { 'enviado':3, 'falha':2, 'pendente':1, '':0 };
+        if((prioridade[statusFinal]||0) > (prioridade[existe.status]||0)) {
+          existe.status = statusFinal;
+          atualizado++;
+        }
+        // Adicionar à lista se não estiver
+        if(listaId){ const l=listas.find(l=>l.id===listaId); if(l&&!l.contatos.includes(existe.id)) l.contatos.push(existe.id); }
+        dup++;
+        return;
+      }
+
       const c = {
         id: Date.now()+i,
         tel, nome:gv('nome','name'),
@@ -2447,14 +2507,25 @@ function processFile(file, listaId) {
         cidade:gv('cidade','city','municipio'),
         obs:gv('obs','observ','note'),
         responsavel: window._pendingImportResp||'',
-        status:'pendente',
+        status: statusFinal,
         addedAt: Date.now()
       };
+      if(statusFinal === 'enviado') jaEnviado++;
       contacts.push(c);
       if(listaId){ const l=listas.find(l=>l.id===listaId); if(l)l.contatos.push(c.id); }
       added++;
     });
-    salvarImediato().then(()=>{ renderC(); updBadges(); toast(`${added} contato(s) importado(s)${dup?`, ${dup} duplicado(s) ignorado(s)`:''}`); });
+
+    invalidateDisparoCache();
+    _filterCacheKey = '';
+    salvarImediato().then(()=>{
+      renderC(); updBadges();
+      let msg = `✅ ${added} importado(s)`;
+      if(jaEnviado)  msg += ` · ${jaEnviado} já enviado(s)`;
+      if(atualizado) msg += ` · ${atualizado} status atualizado(s)`;
+      if(dup)        msg += ` · ${dup} duplicado(s)`;
+      toast(msg);
+    });
   };
   r.readAsBinaryString(file);
 }
@@ -2509,14 +2580,23 @@ function addContato() {
   if(!tel){ toast('Telefone obrigatório','err'); return; }
   if(tel.length===10||tel.length===11) tel='55'+tel;
   if(contacts.find(c=>c.tel===tel)){ toast('Contato já existe','warn'); return; }
+  // Cruzar com logs para definir status correto
+  const t = tel.replace(/\D/g,'');
+  const logInfo = logs.find(l=>{
+    const lt=(l.tel||'').replace(/\D/g,'');
+    return lt===t||lt===t.replace(/^55/,'')||'55'+lt===t;
+  });
+  const statusFinal = logInfo?.status==='enviado'?'enviado':logInfo?.status==='falha'?'falha':'pendente';
   contacts.push({
     id:Date.now(), tel,
     nome:document.getElementById('na-nome').value,
     empresa:document.getElementById('na-emp').value,
     cidade:document.getElementById('na-cid').value,
-    status:'pendente', addedAt:Date.now()
+    status: statusFinal, addedAt:Date.now()
   });
-  salvarImediato(); renderC(); updBadges(); closeModal(); toast('Contato adicionado');
+  invalidateDisparoCache();
+  salvarImediato(); renderC(); updBadges(); closeModal();
+  toast(statusFinal==='enviado' ? 'Contato adicionado — já constava como enviado ✓' : 'Contato adicionado');
 }
 
 function addSelecionadosModal() {
@@ -2985,7 +3065,9 @@ async function fireNext() {
     document.getElementById('fire-btn').disabled=false;
     document.getElementById('fire-banner').style.display='none';
     toast(`🚀 Disparo concluído! ${fila.length} processados`);
-    await salvarImediato(); // salvar imediatamente ao concluir
+    _fireLogsSinceLastSave = 0;
+    backupLogsLocal(); // garantir backup local
+    await salvarImediato(); // salvar TUDO no banco ao concluir
     renderC(); updBadges(); renderLogs(); return;
   }
   const cId=fila[filaIdx];
