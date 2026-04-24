@@ -1624,11 +1624,17 @@ function renderLoginUsers() {
   `).join('');
 }
 // ── USUÁRIOS — 100% no banco ──
-let _usersCache = null; // cache em memória (sem localStorage)
+let _usersCache = null;
 
 function getUsers() {
-  return _usersCache || {
-    gustavoc: {name:'Gustavo C.', role:'Master', master:true, pass:btoa('rise123')},
+  if(_usersCache && Object.keys(_usersCache).length > 0) return _usersCache;
+  // Fallback com todos os usuários conhecidos
+  return {
+    gustavoc:   {name:'Gustavo C.',   role:'Master',       master:true,  pass:btoa('rise123')},
+    giuliab:    {name:'Giulia B.',    role:'Responsável',  master:false, pass:btoa('rise123')},
+    larissap:   {name:'Larissa P.',   role:'Responsável',  master:false, pass:btoa('rise123')},
+    comercial4: {name:'Comercial 4',  role:'Usuário',      master:false, pass:btoa('rise123')},
+    comercial5: {name:'Comercial 5',  role:'Usuário',      master:false, pass:btoa('rise123')},
   };
 }
 function saveUsers(u) {
@@ -1647,11 +1653,13 @@ async function carregarUsuariosDoBanco() {
     const res = await fetch('/api/dados', {headers:{'x-user-key':'_system_users'}});
     if(!res.ok) return;
     const d = await res.json();
-    const u = d.users;
+    const u = d.users || d.extra?.users;
     if(!u || typeof u !== 'object' || !Object.keys(u).length) return;
-    _usersCache = u;
+    // Mesclar com fallback — nunca perder usuários existentes
+    const fallback = getUsers(); // usa fallback hardcoded
+    _usersCache = {...fallback, ...u}; // banco tem prioridade
     renderLoginUsers();
-    console.log('[Users] Carregados do banco:', Object.keys(u).length);
+    console.log('[Users] Carregados do banco:', Object.keys(_usersCache).length);
   } catch(e) { console.warn('[Users] Erro:', e); }
 }
 let _usersPollTimer = null;
@@ -1858,29 +1866,10 @@ function iniciarApp() {
   });
 }
 (async function autoLogin(){
-  // Carregar usuários do banco primeiro
+  // Carregar usuários do banco
   await carregarUsuariosDoBanco();
   renderLoginUsers();
-
-  // Tentar auto-login via sessão no banco
-  // Verificar todos os usuários que podem ter sessão ativa
-  const users = getUsers();
-  for(const key of Object.keys(users)) {
-    try {
-      const res = await fetch('/api/dados', {headers:{'x-user-key':'_session_'+key}});
-      if(!res.ok) continue;
-      const d = await res.json();
-      const sess = d.session || d.extra?.session;
-      if(sess && sess.key && Date.now() - sess.ts < 8*3600*1000) {
-        if(users[sess.key]) {
-          selUsuario = sess.key;
-          currentUser = {key: sess.key, ...users[sess.key]};
-          iniciarApp();
-          return;
-        }
-      }
-    } catch(e){}
-  }
+  // Mostrar tela de login — usuário faz login normalmente
 })();
 
 // ── PERSIST: NEON ──
