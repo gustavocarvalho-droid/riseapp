@@ -1299,7 +1299,7 @@ input[type=range]::-moz-range-thumb{
           <button class="btn btn-sm" onclick="expLogs()">⬇ Exportar CSV</button>
           <button class="btn btn-sm btn-amber" onclick="reenviarFalhas()">🔁 Reenviar falhas</button>
           <button class="btn btn-sm btn-danger" onclick="limparLogs()">🗑 Limpar logs</button>
-          <button class="btn btn-sm btn-blue" onclick="recuperarLogsBackup()" title="Recuperar logs do backup local">🔄 Recuperar backup</button>
+          
           <div id="rlog-resp-wrap" style="display:none;margin-left:auto">
             <select id="rlog-resp-filter" style="width:auto;min-width:160px;font-size:12px" onchange="renderLogs()">
               <option value="">👥 Todos os usuários</option>
@@ -1623,48 +1623,37 @@ function renderLoginUsers() {
     </div>
   `).join('');
 }
+// ── USUÁRIOS — 100% no banco ──
+let _usersCache = null; // cache em memória (sem localStorage)
+
 function getUsers() {
-  try {
-    const d = localStorage.getItem('rise_users');
-    if (d) return JSON.parse(d);
-  } catch(e) {}
-  // Fallback: usuários padrão (serão sobrescritos ao carregar do banco)
-  return {
+  return _usersCache || {
     gustavoc: {name:'Gustavo C.', role:'Master', master:true, pass:btoa('rise123')},
-    giuliab:  {name:'Giulia B.',  role:'Responsável', master:false, pass:btoa('rise123')},
-    larissap: {name:'Larissa P.', role:'Responsável', master:false, pass:btoa('rise123')},
   };
 }
 function saveUsers(u) {
-  localStorage.setItem('rise_users', JSON.stringify(u));
-  // Salvar no banco — campo 'users' vai para coluna 'extra' via backend
-  fetch('/api/dados', {
+  _usersCache = u; // atualizar cache em memória
+  return fetch('/api/dados', {
     method:'POST',
     headers:{'Content-Type':'application/json','x-user-key':'_system_users'},
     body: JSON.stringify({ users: u })
   }).then(r=>{
-    if(!r.ok) console.warn('[Users] saveUsers banco falhou:', r.status);
-    else console.log('[Users] Salvos no banco:', Object.keys(u).length, 'usuarios');
+    if(!r.ok) console.warn('[Users] saveUsers falhou:', r.status);
+    else console.log('[Users] Salvos no banco:', Object.keys(u).length);
   }).catch(e=>console.warn('[Users] saveUsers erro:', e));
 }
-
-// Carregar usuarios do banco — remoto tem prioridade
 async function carregarUsuariosDoBanco() {
   try {
     const res = await fetch('/api/dados', {headers:{'x-user-key':'_system_users'}});
     if(!res.ok) return;
     const d = await res.json();
-    const usersRemoto = d.users;
-    if(!usersRemoto || typeof usersRemoto !== 'object' || !Object.keys(usersRemoto).length) return;
-    localStorage.setItem('rise_users', JSON.stringify(usersRemoto));
+    const u = d.users;
+    if(!u || typeof u !== 'object' || !Object.keys(u).length) return;
+    _usersCache = u;
     renderLoginUsers();
-    console.log('[Users] Sincronizados do banco:', Object.keys(usersRemoto).length, 'usuarios');
-  } catch(e) {
-    console.warn('[Users] Erro ao carregar do banco:', e);
-  }
+    console.log('[Users] Carregados do banco:', Object.keys(u).length);
+  } catch(e) { console.warn('[Users] Erro:', e); }
 }
-
-// Polling de usuarios — atualiza a lista a cada 30s
 let _usersPollTimer = null;
 function startUsersPolling() {
   if(_usersPollTimer) return;
@@ -1673,7 +1662,6 @@ function startUsersPolling() {
     await carregarUsuariosDoBanco();
     const depois = JSON.stringify(getUsers());
     if(antes !== depois) {
-      console.log('[Users] Lista atualizada via polling');
       const loginScreen = document.getElementById('login-screen');
       if(loginScreen && loginScreen.style.display !== 'none') renderLoginUsers();
       if(currentUser) renderConfig();
@@ -1681,28 +1669,26 @@ function startUsersPolling() {
   }, 30000);
 }
 
-// ── CONFIG ──
-function getCfgKey() {
-  return CFG_KEY + '_' + (currentUser?.key||'default');
-}
+// ── CONFIG — 100% no banco ──
+let _cfgCache = {}; // cache em memória por userKey: { url, key, inst }
+let _globalCfgCache = {}; // url e apikey globais
+
+function getCfgKey() { return currentUser?.key||'default'; }
 function getCfg() {
-  try {
-    const userCfg = JSON.parse(localStorage.getItem(getCfgKey()));
-    if(userCfg && (userCfg.url||userCfg.inst)) return userCfg;
-    // Fallback para config global
-    return JSON.parse(localStorage.getItem(CFG_KEY)) || {};
-  }
-  catch(e) { return {}; }
+  const uc = _cfgCache[getCfgKey()] || {};
+  if(uc.url||uc.inst) return uc;
+  return _globalCfgCache;
 }
 function saveCfgLocal(c) {
-  localStorage.setItem(getCfgKey(), JSON.stringify(c));
-  // Salvar instância no banco para sincronizar entre computadores
+  // Salvar em memória
+  _cfgCache[getCfgKey()] = c;
+  // Salvar no banco
   const userKey = currentUser?.key;
-  if(userKey && c.inst) {
+  if(userKey) {
     fetch('/api/dados', {
       method:'POST',
       headers:{'Content-Type':'application/json','x-user-key':'_cfg_'+userKey},
-      body: JSON.stringify({ inst: c.inst, url: c.url||'', key: c.key||'' })
+      body: JSON.stringify({ inst: c.inst||'', url: c.url||'', key: c.key||'' })
     }).catch(()=>{});
   }
 }
@@ -1717,34 +1703,38 @@ function getApiBase(){
 function getApiKey() { return getCfg().key||''; }
 function getInst()   { return getCfg().inst||''; }
 
-// Carregar configuração de instância do banco (para outros computadores)
+// Carregar configuração de instância do banco
 async function carregarCfgDoBanco() {
   const userKey = currentUser?.key;
   if(!userKey) return;
-
   try {
-    const res = await fetch('/api/dados', {headers:{'x-user-key':'_cfg_'+userKey}});
-    if(!res.ok) return;
-    const d = await res.json();
-    const inst = d.inst || d.extra?.inst;
-    const url  = d.url  || d.extra?.url;
-    const apikey = d.key || d.extra?.key;
-
-    if(!inst) return; // sem instância no banco
-
-    // Sempre atualizar a instância do banco (fonte da verdade)
-    const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
-    const localCfg = JSON.parse(localStorage.getItem(getCfgKey())||'{}');
-    const newCfg = {
-      inst,
-      url: url || localCfg.url || globalCfg.url || '',
-      key: apikey || localCfg.key || globalCfg.key || ''
-    };
-    localStorage.setItem(getCfgKey(), JSON.stringify(newCfg));
-    console.log('[Cfg] Instância carregada do banco:', inst, '→ user:', userKey);
-  } catch(e) {
-    console.warn('[Cfg] Erro ao carregar instância do banco:', e);
-  }
+    // Carregar config global e config do usuário em paralelo
+    const [resGlobal, resUser] = await Promise.all([
+      fetch('/api/dados', {headers:{'x-user-key':'_config_global'}}).catch(()=>null),
+      fetch('/api/dados', {headers:{'x-user-key':'_cfg_'+userKey}}).catch(()=>null)
+    ]);
+    if(resGlobal?.ok) {
+      const dg = await resGlobal.json();
+      const g = dg.config || dg.extra || dg;
+      if(g.url||g.key) {
+        _globalCfgCache = { url: g.url||'', key: g.apikey||g.key||'' };
+        console.log('[Cfg] Global carregada do banco:', _globalCfgCache.url);
+      }
+    }
+    if(resUser?.ok) {
+      const du = await resUser.json();
+      const u = du.extra || du;
+      const inst = u.inst || du.inst;
+      if(inst) {
+        _cfgCache[userKey] = {
+          inst,
+          url: u.url || _globalCfgCache.url || '',
+          key: u.key || u.apikey || _globalCfgCache.key || ''
+        };
+        console.log('[Cfg] Instância carregada do banco:', inst, '→', userKey);
+      }
+    }
+  } catch(e) { console.warn('[Cfg] Erro:', e); }
 }
 
 // ── NAVIGATION ──
@@ -1827,11 +1817,14 @@ function doLogin() {
   if(!u) return;
   const pwd = document.getElementById('pwd-input').value;
   const err = document.getElementById('login-err');
-  if(btoa(pwd) !== u.pass) {
-    err.textContent = '❌ Senha incorreta'; return;
-  }
+  if(btoa(pwd) !== u.pass) { err.textContent = '❌ Senha incorreta'; return; }
   err.textContent = '';
-  localStorage.setItem(SESS_KEY, JSON.stringify({key:selUsuario, ts:Date.now()}));
+  // Salvar sessão no banco
+  fetch('/api/dados', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-user-key':'_session_'+selUsuario},
+    body: JSON.stringify({ session: { key: selUsuario, ts: Date.now() } })
+  }).catch(()=>{});
   currentUser = {key:selUsuario, ...u};
   iniciarApp();
 }
@@ -1846,32 +1839,16 @@ function iniciarApp() {
     if(cfgNav) cfgNav.style.display='none';
   }
   loadCfgToForm();
-
-  // Garantir URL+Key do config global
-  const globalCfg2 = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
-  if(globalCfg2.url||globalCfg2.key) {
-    const userCfgCheck = JSON.parse(localStorage.getItem(CFG_KEY+'_'+(currentUser?.key||''))||'{}');
-    if(!userCfgCheck.url) {
-      localStorage.setItem(CFG_KEY+'_'+(currentUser?.key||''), JSON.stringify({
-        ...userCfgCheck, url:globalCfg2.url, key:globalCfg2.key
-      }));
-    }
-  }
-
   // PRIMEIRO carregar cfg do banco (instância), DEPOIS iniciar app
   carregarCfgDoBanco().then(()=>{
     const inst = getInst();
-    const base = getApiBase();
-    console.log(`[Init] user=${currentUser?.key} inst=${inst} base=${base}`);
-    if(!inst) {
-      toast(`⚠️ Instância não configurada para ${u.name}. Peça ao Master para configurar em Configurações.`, 'warn');
-    }
-
+    console.log(`[Init] user=${currentUser?.key} inst=${inst} base=${getApiBase()}`);
+    if(!inst) toast(`⚠️ Instância não configurada para ${u.name}. Peça ao Master configurar.`, 'warn');
     carregarDados().then(()=>{
       startPolling();
       startUsersPolling();
       startDataSync();
-      startConnCheck(); // verificar conexão a cada 60s
+      startConnCheck();
       renderC();
       updBadges();
       startAgTimer();
@@ -1880,25 +1857,30 @@ function iniciarApp() {
     });
   });
 }
-(function autoLogin(){
-  // Primeiro carrega usuários do banco (async), depois tenta auto-login
-  carregarUsuariosDoBanco().then(() => {
-    renderLoginUsers();
+(async function autoLogin(){
+  // Carregar usuários do banco primeiro
+  await carregarUsuariosDoBanco();
+  renderLoginUsers();
+
+  // Tentar auto-login via sessão no banco
+  // Verificar todos os usuários que podem ter sessão ativa
+  const users = getUsers();
+  for(const key of Object.keys(users)) {
     try {
-      const s = JSON.parse(localStorage.getItem(SESS_KEY));
-      if(s && Date.now()-s.ts < 8*3600*1000) {
-        const users = getUsers();
-        if(users[s.key]) {
-          selUsuario = s.key;
-          currentUser = {key:s.key, ...users[s.key]};
+      const res = await fetch('/api/dados', {headers:{'x-user-key':'_session_'+key}});
+      if(!res.ok) continue;
+      const d = await res.json();
+      const sess = d.session || d.extra?.session;
+      if(sess && sess.key && Date.now() - sess.ts < 8*3600*1000) {
+        if(users[sess.key]) {
+          selUsuario = sess.key;
+          currentUser = {key: sess.key, ...users[sess.key]};
           iniciarApp();
           return;
         }
       }
-    } catch(e) {}
-  });
-  // Renderizar imediatamente com o que está no localStorage (enquanto carrega do banco)
-  renderLoginUsers();
+    } catch(e){}
+  }
 })();
 
 // ── PERSIST: NEON ──
@@ -1910,26 +1892,10 @@ let _pendingSave = false;
 // ── BACKUP LOCAL ──
 // Salva logs no localStorage como segurança caso o banco falhe
 function backupLogsLocal() {
-  try {
-    const key = 'rise_logs_backup_' + (currentUser?.key||'shared');
-    // Guardar os 2000 logs mais recentes no backup local
-    const toSave = logs.slice(0, 2000);
-    localStorage.setItem(key, JSON.stringify(toSave));
-  } catch(e) {
-    // Se der quota error, tentar com menos
-    try {
-      const key = 'rise_logs_backup_' + (currentUser?.key||'shared');
-      localStorage.setItem(key, JSON.stringify(logs.slice(0, 500)));
-    } catch(e2) {}
-  }
+  // localStorage removido — banco é a única fonte da verdade
 }
 function restoreLogsLocal() {
-  try {
-    const key = 'rise_logs_backup_' + (currentUser?.key||'shared');
-    const raw = localStorage.getItem(key);
-    if(!raw) return [];
-    return JSON.parse(raw)||[];
-  } catch(e) { return []; }
+  return []; // banco é a única fonte da verdade
 }
 
 // Mescla dois arrays de logs sem duplicatas (por id)
@@ -1939,20 +1905,17 @@ function mergeLogs(a, b) {
   return Object.values(map).sort((x,y)=>(y.time||'').localeCompare(x.time||''));
 }
 
-let _fireLogsSinceLastSave = 0; // contador de logs desde último save durante disparo
+let _fireLogsSinceLastSave = 0;
 
 function salvarDados() {
   invalidateDisparoCache();
-  backupLogsLocal(); // SEMPRE salvar local primeiro — nunca perder
   if(fireActive) {
     _fireLogsSinceLastSave++;
-    // Durante disparo: salvar no banco a cada 5 envios
     if(_fireLogsSinceLastSave >= 5) {
       _fireLogsSinceLastSave = 0;
       _pendingSave = true;
       if(!_isSaving) _flushSave();
     }
-    // Se não está salvando ainda, garantir que vai salvar
     if(!_isSaving && !saveTimeout) {
       _pendingSave = true;
       clearTimeout(saveTimeout);
@@ -1972,8 +1935,6 @@ function _flushSave() {
 }
 
 async function salvarImediato() {
-  backupLogsLocal();
-  // Aguardar save em andamento terminar (máx 5s)
   let waited = 0;
   while(_isSaving && waited < 5000) {
     await new Promise(r=>setTimeout(r,100));
@@ -1989,12 +1950,13 @@ async function _saveNeon() {
   const ind = document.getElementById('save-indicator');
   const userKey = currentUser?.key || 'shared';
 
+  // Manter allLogs atualizado com logs próprios
   const ownName = currentUser?.name||'';
-  allLogs = allLogs.filter(l => l._owner && l._owner !== ownName);
-  logs.forEach(l => { if(!allLogs.find(x=>x.id===l.id)) allLogs.push({...l, _owner: ownName}); });
-  allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
+  logs.forEach(l => {
+    if(!allLogs.find(x=>x.id===l.id)) allLogs.push({...l, _owner: ownName, enviadoPor: l.enviadoPor||ownName});
+  });
 
-  // Trimmar chatLogs para não inflar o payload
+  // Trimmar chatLogs
   const chatLogsTrimmed = {};
   Object.entries(chatLogs).forEach(([k,v])=>{ chatLogsTrimmed[k]=(v||[]).slice(-20); });
 
@@ -2037,77 +1999,36 @@ async function _saveNeon() {
 }
 async function carregarDados() {
   const userKey = currentUser?.key || 'shared';
-
-  // PASSO 1: Restaurar backup local IMEDIATAMENTE (antes de qualquer fetch)
-  // Garante que o usuário nunca vê tela vazia
-  const logsLocal = restoreLogsLocal();
-  if(logsLocal.length > 0) {
-    logs = mergeLogs(logs, logsLocal);
-    invalidateDisparoCache();
-    updBadges();
-  }
-
   try {
     const res = await fetch('/api/dados', { headers:{'x-user-key': userKey} });
-    let d = res.ok ? await res.json() : {};
-    if(!d) d = {};
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
 
-    const logsBanco = d.logs || [];
-    console.log('[Load] banco=' + logsBanco.length + ' local=' + logsLocal.length + ' user=' + userKey);
+    console.log('[Load] banco=' + (d.logs?.length||0) + ' contacts=' + (d.contacts?.length||0) + ' user=' + userKey);
 
-    // PASSO 2: Migração do shared (só se banco vazio)
-    if(!logsBanco.length && !(d.contacts?.length)) {
-      try {
-        const rs = await fetch('/api/dados', { headers:{'x-user-key':'shared'} });
-        if(rs.ok) {
-          const shared = await rs.json();
-          if(shared.contacts?.length || shared.logs?.length) {
-            d = {...shared};
-            toast('Dados migrados!');
-            setTimeout(()=>salvarImediato(), 800);
-          }
-        }
-      } catch(e){}
-    }
-
-    // PASSO 3: Aplicar dados do banco
-    if(d.contacts?.length) contacts = d.contacts;
-    if(d.listas?.length) listas = d.listas;
-    if(d.crm?.length) crmData = d.crm;
-    if(d.fila) fila = d.fila;
-    if(d.agendamentos?.length) agendamentos = d.agendamentos;
-    if(d.savedmsg) savedMsg = d.savedmsg;
-    if(d.config?.tpls) tpls = d.config.tpls;
+    // Aplicar dados do banco diretamente
+    contacts    = d.contacts     || [];
+    listas      = d.listas       || [];
+    crmData     = d.crm          || [];
+    fila        = d.fila         || [];
+    agendamentos= d.agendamentos || [];
+    savedMsg    = d.savedmsg     || '';
+    logs        = d.logs         || [];
+    if(d.config?.tpls)                        tpls         = d.config.tpls;
     if(d.chatLogs && Object.keys(d.chatLogs).length) chatLogs = d.chatLogs;
-    if(d.crmCustomCols?.length) crmCustomCols = d.crmCustomCols;
+    if(d.crmCustomCols?.length)               crmCustomCols= d.crmCustomCols;
 
-    // PASSO 4: Merge definitivo de logs — banco + local (nunca perder nenhum)
-    const logsBancoArr = d.logs || [];
-    logs = mergeLogs(logsBancoArr, logsLocal);
     invalidateDisparoCache();
     _filterCacheKey = '';
 
-    console.log('[Load] Logs finais: ' + logs.length + ' (banco:' + logsBancoArr.length + ' local:' + logsLocal.length + ')');
-
-    // PASSO 5: Atualizar backup local com todos os logs mesclados
-    backupLogsLocal();
-
-    // PASSO 6: Se tem logs que o banco não tinha, salvar de volta (recuperação)
-    if(logs.length > logsBancoArr.length) {
-      const extras = logs.length - logsBancoArr.length;
-      console.log('[Load] Recuperando ' + extras + ' logs para o banco...');
-      setTimeout(()=>salvarImediato(), 1000);
-    }
-
     renderC(); renderListas(); updBadges(); renderAgendamentos();
     loadAllChats();
-    if(currentUser?.master) await carregarLogsGlobais();
+    await carregarLogsGlobais();
+    startGlobalLogsSync();
 
   } catch(e) {
-    console.warn('[Load] Erro no banco:', e.message);
-    // Banco falhou mas já temos os logs locais carregados no passo 1
-    toast('⚠ Banco temporariamente indisponível. Dados locais carregados.','warn');
-    renderC(); renderListas(); updBadges();
+    console.warn('[Load] Erro:', e.message);
+    toast('⚠ Erro ao carregar dados do banco. Tente recarregar a página.', 'err');
   }
 }
 // Migração manual — força importar tudo do shared para o usuário atual
@@ -2165,34 +2086,83 @@ async function migrarDoShared() {
 // Carrega logs de TODOS os usuários (apenas Master)
 async function carregarLogsGlobais() {
   const users = getUsers();
-  const allUserKeys = Object.keys(users).filter(k => k !== currentUser.key);
-  for(const key of allUserKeys) {
+  const allUserKeys = Object.keys(users).filter(k => k !== currentUser?.key);
+  if(!allUserKeys.length) return;
+
+  // Buscar todos em paralelo para ser mais rápido
+  const fetches = allUserKeys.map(async key => {
     try {
-      // Buscar da chave dedicada de logs (nova) E do payload principal (compatibilidade)
-      const [resDados, resLogs] = await Promise.all([
-        fetch('/api/dados', { headers:{'x-user-key': key} }).catch(()=>null),
-        fetch('/api/dados', { headers:{'x-user-key': key+'_logs'} }).catch(()=>null)
-      ]);
-
-      let userLogs = [];
-      if(resDados?.ok) {
-        const d = await resDados.json();
-        userLogs = mergeLogs(userLogs, d.logs||[]);
-      }
-      if(resLogs?.ok) {
-        const dl = await resLogs.json();
-        userLogs = mergeLogs(userLogs, dl.logs||[]);
-      }
-
+      const res = await fetch('/api/dados', { headers:{'x-user-key': key} });
+      if(!res.ok) return;
+      const d = await res.json();
+      const userLogs = d.logs || [];
       const userName = users[key]?.name || key;
-      userLogs.map(l=>({...l, _owner: userName})).forEach(l=>{
-        if(!allLogs.find(x=>x.id===l.id)) allLogs.push(l);
+      userLogs.forEach(l => {
+        const tagged = {...l, _owner: userName, enviadoPor: l.enviadoPor||userName};
+        if(!allLogs.find(x=>x.id===l.id)) allLogs.push(tagged);
+        else {
+          // atualizar _owner se estava sem
+          const ex = allLogs.find(x=>x.id===l.id);
+          if(ex && !ex._owner) ex._owner = userName;
+        }
       });
       console.log(`[GlobalLogs] ${userName}: ${userLogs.length} logs`);
     } catch(e){ console.warn('[GlobalLogs] Erro para', key, e); }
-  }
+  });
+
+  await Promise.all(fetches);
   allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
   console.log(`[GlobalLogs] Total allLogs: ${allLogs.length}`);
+}
+
+// Sync periódico de logs de todos os usuários (roda para TODOS, não só master)
+let _globalSyncTimer = null;
+async function startGlobalLogsSync() {
+  if(_globalSyncTimer) return;
+  // Primeira execução imediata após 5s
+  setTimeout(()=>syncAllUsersLogs(), 5000);
+  // Depois a cada 45s
+  _globalSyncTimer = setInterval(syncAllUsersLogs, 45000);
+}
+
+async function syncAllUsersLogs() {
+  if(document.hidden) return;
+  if(fireActive) return;
+  const users = getUsers();
+  const allUserKeys = Object.keys(users).filter(k => k !== currentUser?.key);
+  if(!allUserKeys.length) return;
+
+  let novosTotal = 0;
+  for(const key of allUserKeys) {
+    try {
+      const res = await fetch('/api/dados', { headers:{'x-user-key': key} });
+      if(!res.ok) continue;
+      const d = await res.json();
+      const userLogs = d.logs || [];
+      const userName = users[key]?.name || key;
+
+      let novos = 0;
+      userLogs.forEach(l => {
+        if(!allLogs.find(x=>x.id===l.id)) {
+          allLogs.push({...l, _owner: userName, enviadoPor: l.enviadoPor||userName});
+          novos++;
+        }
+      });
+      if(novos > 0) {
+        novosTotal += novos;
+        console.log(`[GlobalSync] ${userName}: +${novos} logs novos`);
+      }
+    } catch(e){}
+  }
+
+  if(novosTotal > 0) {
+    allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
+    // Atualizar telas abertas
+    if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
+    if(document.getElementById('panel-historicodisparos')?.classList.contains('show')) renderHistoricoDisparos();
+    updBadges();
+    console.log(`[GlobalSync] Total: +${novosTotal} logs de outros usuários`);
+  }
 }
 
 function updBadges() {
@@ -3871,11 +3841,9 @@ function expCRM() {
 
 // ── LOGS ──
 function renderLogs() {
-  // Master vê todos; outros veem apenas seus próprios
-  const isMaster = currentUser?.master;
-  const srcLogs = isMaster ? allLogs : logs;
+  const srcLogs = allLogs.length ? allLogs : logs; // todos usuários
 
-  // Filtro de responsável (só master vê)
+  // Filtro de responsável — visível para todos
   const respF = document.getElementById('rlog-resp-filter')?.value||'';
   const filtered = respF ? srcLogs.filter(l=>(l.enviadoPor||l._owner||'')===respF) : srcLogs;
 
@@ -3886,9 +3854,18 @@ function renderLogs() {
   document.getElementById('rlog-total').textContent=filtered.length;
   document.getElementById('rlog-rate').textContent=filtered.length?Math.round(logs_env/filtered.length*100)+'%':'0%';
 
-  // Mostrar/esconder filtro de responsável (só master)
+  // Atualizar opções do filtro de responsável
   const respWrap = document.getElementById('rlog-resp-wrap');
-  if(respWrap) respWrap.style.display = isMaster ? '' : 'none';
+  if(respWrap) {
+    respWrap.style.display = '';
+    const sel = document.getElementById('rlog-resp-filter');
+    if(sel) {
+      const users = [...new Set(srcLogs.map(l=>l.enviadoPor||l._owner||'').filter(Boolean))].sort();
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">Todos os usuários</option>' +
+        users.map(u=>`<option value="${esc(u)}" ${cur===u?'selected':''}>${esc(u)}</option>`).join('');
+    }
+  }
 
   const tbody=document.getElementById('log-tbody');
   if(!tbody) return;
@@ -3914,7 +3891,7 @@ function renderLogs() {
 }
 function expLogs() {
   const isMaster = currentUser?.master;
-  const srcLogs = isMaster ? allLogs : logs;
+  const srcLogs = allLogs.length ? allLogs : logs; // todos usuários
   const csv='Data,Nome,Telefone,Enviado Por,Status,Mensagem,Erro\n'+
     srcLogs.map(l=>[l.time,l.nome,fmt(l.tel),l.enviadoPor||l._owner||'',l.status,(l.msg||'').replace(/,/g,';'),(l.erro||'').replace(/,/g,';')].join(',')).join('\n');
   const a=document.createElement('a');
@@ -3994,8 +3971,7 @@ function _doLimparLogs(periodo) {
     });
   }
 
-  backupLogsLocal();
-  salvarImediato();
+    salvarImediato();
   renderLogs();
   updBadges();
   closeModal();
@@ -4110,7 +4086,7 @@ async function trocarNum() {
 
 // ── CONFIG ──
 function loadCfgToForm() {
-  const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+  const globalCfg = _globalCfgCache;
   const u=el=>document.getElementById(el);
   if(u('cf-url')) u('cf-url').value=globalCfg.url||'';
   if(u('cf-key')) u('cf-key').value=globalCfg.key||'';
@@ -4118,15 +4094,19 @@ function loadCfgToForm() {
 function saveConf() {
   const url=(document.getElementById('cf-url')?.value||'').trim();
   const key=(document.getElementById('cf-key')?.value||'').trim();
-  // Save URL+Key globally (shared)
-  const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
-  localStorage.setItem(CFG_KEY, JSON.stringify({...globalCfg, url, key}));
-  // Update all user configs with new URL+Key
+  // Atualizar cache em memória
+  _globalCfgCache = { url, key };
   const users=getUsers();
   Object.keys(users).forEach(k=>{
-    const uc=JSON.parse(localStorage.getItem(CFG_KEY+'_'+k)||'{}');
-    localStorage.setItem(CFG_KEY+'_'+k, JSON.stringify({...uc, url, key}));
+    _cfgCache[k] = {...(_cfgCache[k]||{}), url, key};
   });
+  // Salvar no banco
+  fetch('/api/dados', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-user-key':'_config_global'},
+    body: JSON.stringify({ config: { url, key } })
+  }).then(r=>r.ok?console.log('[Cfg] Global salva no banco'):console.warn('[Cfg] Falha ao salvar global'))
+    .catch(()=>{});
   toast('Configurações globais salvas ✓');
   checkNum();
   renderConfig();
@@ -4213,10 +4193,10 @@ function renderConfig() {
   // Render user instances
   const instWrap = document.getElementById('user-instances-list');
   if(instWrap) {
-    const globalUrl = (JSON.parse(localStorage.getItem(CFG_KEY)||'{}')).url||'';
-    const globalKey = (JSON.parse(localStorage.getItem(CFG_KEY)||'{}')).key||'';
+    const globalUrl = (_globalCfgCache).url||'';
+    const globalKey = (_globalCfgCache).key||'';
     instWrap.innerHTML = Object.entries(users).map(([k,u])=>{
-      const userCfg = JSON.parse(localStorage.getItem(CFG_KEY+'_'+k)||'{}');
+      const userCfg = (_cfgCache[k]||{});
       const inst = userCfg.inst||'';
       const isMe = k === currentUser?.key;
       return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--s2);border:1px solid ${isMe?'var(--bd)':'var(--bd2)'};border-radius:10px;margin-bottom:8px">
@@ -4234,8 +4214,8 @@ function renderConfig() {
 function editUserInst(userKey) {
   const users = getUsers();
   const u = users[userKey];
-  const userCfg = JSON.parse(localStorage.getItem(CFG_KEY+'_'+userKey)||'{}');
-  const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+  const userCfg = (_cfgCache[userKey]||{});
+  const globalCfg = _globalCfgCache;
   showModal(`
     <div class="modal-title">📱 Instância de ${esc(u?.name||userKey)}</div>
     <div class="modal-sub">Configure o número WhatsApp deste usuário</div>
@@ -4257,13 +4237,13 @@ function editUserInst(userKey) {
 
 function _saveUserInst(userKey) {
   const inst = document.getElementById('edit-inst-val')?.value?.trim();
-  const globalCfg = JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+  const globalCfg = _globalCfgCache;
   const userCfg = {
     url: globalCfg.url||'',
     key: globalCfg.key||'',
     inst: inst||''
   };
-  localStorage.setItem(CFG_KEY+'_'+userKey, JSON.stringify(userCfg));
+  _cfgCache[userKey] = userCfg;
 
   // Salvar no banco para sincronizar em outros computadores
   fetch('/api/dados', {
@@ -4304,7 +4284,7 @@ function excluirUsuario(key) {
   delete users[key];
   saveUsers(users);
   // Remover config de instância do localStorage
-  localStorage.removeItem(CFG_KEY+'_'+key);
+  delete _cfgCache[key];
   closeModal();
   renderConfig();
   renderLoginUsers();
@@ -4647,8 +4627,16 @@ function openUserMenu() {
 }
 
 function doLogout() {
-  localStorage.removeItem('rise_session');
+  // Invalidar sessão no banco
+  if(currentUser?.key) {
+    fetch('/api/dados', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-user-key':'_session_'+currentUser.key},
+      body: JSON.stringify({ session: { key: currentUser.key, ts: 0 } }) // ts=0 = expirado
+    }).catch(()=>{});
+  }
   currentUser = null;
+  _cfgCache = {};
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('pwd-input').value='';
   document.getElementById('login-err').textContent='';
@@ -4702,9 +4690,7 @@ function renderHistoricoDisparos() {
   // Fonte de logs: master vê tudo, outros só os seus
   const isMaster = currentUser?.master;
   // Para não-master: usar logs diretamente. Para master: allLogs (com fallback para logs)
-  const srcLogs = isMaster
-    ? (allLogs.length ? allLogs : logs.map(l=>({...l, _owner: currentUser?.name||''})))
-    : logs;
+  const srcLogs = allLogs.length ? allLogs : logs.map(l=>({...l, _owner: currentUser?.name||''}));
 
   // Filtrar por responsável
   let logsF = respF ? srcLogs.filter(l=>(l.enviadoPor||l._owner||'')===respF) : srcLogs;
@@ -4889,7 +4875,7 @@ function toggleHDSection(id) {
 
 function expDia(day) {
   const isMaster = currentUser?.master;
-  const srcLogs = isMaster ? allLogs : logs;
+  const srcLogs = allLogs.length ? allLogs : logs; // todos usuários
   const entries = srcLogs.filter(l=>(l.time||'').startsWith(day));
   if(!entries.length){ toast('Sem logs neste dia','warn'); return; }
   const csv = 'Data/Hora,Nome,Telefone,Empresa,Enviado Por,Status,Mensagem,Erro\n' +
@@ -4902,7 +4888,7 @@ function expDia(day) {
 
 function expHistoricoDisparos() {
   const isMaster = currentUser?.master;
-  const srcLogs = isMaster ? allLogs : logs;
+  const srcLogs = allLogs.length ? allLogs : logs; // todos usuários
   const csv = 'Data/Hora,Nome,Telefone,Empresa,Enviado Por,Status,Mensagem,Erro\n' +
     srcLogs.map(l=>[
       l.time, l.nome, fmt(l.tel), l.empresa||'',
@@ -4938,8 +4924,7 @@ function recuperarLogsBackup() {
   });
 
   if(totalRecuperados > 0) {
-    backupLogsLocal();
-    salvarImediato();
+        salvarImediato();
     renderLogs();
     updBadges();
     toast(`✅ ${totalRecuperados} logs recuperados do backup local!`);
@@ -5262,8 +5247,7 @@ async function syncDadosBanco() {
     if(logsNovos.length > 0) {
       logs = mergeLogs(logs, d.logs||[]);
       invalidateDisparoCache();
-      backupLogsLocal();
-      if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
+            if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
       if(document.getElementById('panel-historicodisparos')?.classList.contains('show')) renderHistoricoDisparos();
       updBadges();
     }
