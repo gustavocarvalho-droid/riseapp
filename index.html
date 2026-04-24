@@ -260,6 +260,9 @@ select option{background:var(--s2)}
 .badge-amber{background:rgba(255,171,64,.12);color:var(--amber);border:1px solid rgba(255,171,64,.25)}
 .badge-blue{background:rgba(64,196,255,.12);color:var(--blue);border:1px solid rgba(64,196,255,.25)}
 .badge-dim{background:var(--s3);color:var(--t2);border:1px solid var(--bd2)}
+select.badge{cursor:pointer;-webkit-appearance:none;appearance:none;outline:none;transition:opacity .15s;font-family:var(--mono);min-width:88px;text-align:center}
+select.badge:hover{opacity:.8}
+select.badge option{background:#161c24;color:#e8edf2;font-weight:500}
 .badge-purple{background:rgba(206,147,216,.12);color:var(--purple);border:1px solid rgba(206,147,216,.25)}
 
 /* ── TABLE ── */
@@ -2212,6 +2215,41 @@ function updBadges() {
 
 // ── CONTATOS ──
 
+function st_badge_click(c) {
+  const opts = [
+    { val:'pendente', label:'Pendente',  cls:'badge-dim'   },
+    { val:'enviado',  label:'✓ Enviado', cls:'badge-green' },
+    { val:'falha',    label:'✗ Falha',   cls:'badge-red'   },
+  ];
+  const cur = opts.find(o=>o.val===c.status)||opts[0];
+  const optionsHtml = opts.map(o=>
+    `<option value="${o.val}" ${c.status===o.val?'selected':''}>${o.label}</option>`
+  ).join('');
+  return `<select
+    class="badge ${cur.cls}"
+    style="border:none;cursor:pointer;font-size:11px;font-weight:600;padding:2px 6px;border-radius:20px;background:var(--badge-bg,rgba(255,255,255,.07));outline:none;-webkit-appearance:none;appearance:none;min-width:90px;text-align:center"
+    onchange="setContactStatus(${c.id}, this.value, this)"
+    onclick="event.stopPropagation()"
+    title="Clique para alterar o status"
+  >${optionsHtml}</select>`;
+}
+
+function setContactStatus(id, newStatus, el) {
+  const c = contacts.find(x=>x.id===id);
+  if(!c) return;
+  const old = c.status;
+  c.status = newStatus;
+  // Atualizar visual do select imediatamente
+  const clsMap = { pendente:'badge-dim', enviado:'badge-green', falha:'badge-red' };
+  if(el) {
+    el.className = `badge ${clsMap[newStatus]||'badge-dim'}`;
+  }
+  invalidateDisparoCache();
+  salvarDados();
+  updBadges();
+  toast(`Status de ${esc(c.nome||fmt(c.tel))} → ${newStatus}`);
+}
+
 function renderC() {
   buildFilters();
   const srch = (document.getElementById('ct-search')?.value||'').toLowerCase();
@@ -2340,7 +2378,7 @@ function renderC() {
           : `<button class="btn btn-xs btn-amber" onclick="atribuirResp(${c.id})">+ Atribuir</button>`
         }
       </td>
-      <td>${st_badge}</td>
+      <td>${st_badge_click(c)}</td>
       <td>${dispadoCell}</td>
       <td>${crmBadge}</td>
       <td>
