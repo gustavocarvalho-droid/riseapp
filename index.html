@@ -4806,150 +4806,199 @@ function _doChangePwdSelf() {
 function renderRelatorioPessoa() {
   const users = getUsers();
 
-  // Popular select de usuários
+  // Popular select — sempre atualizar
   const selUser = document.getElementById('rp-user');
-  if(selUser && selUser.options.length <= 1) {
-    Object.entries(users).forEach(([k,u])=>{
-      const o = document.createElement('option');
-      o.value = k; o.textContent = u.name;
-      selUser.appendChild(o);
-    });
+  if(selUser) {
+    const curVal = selUser.value;
+    selUser.innerHTML = '<option value="">Todos os usuários</option>' +
+      Object.entries(users).map(([k,u])=>`<option value="${k}" ${curVal===k?'selected':''}>${esc(u.name)}</option>`).join('');
   }
 
-  const selUserVal  = document.getElementById('rp-user')?.value || '';
-  const periodDays  = parseInt(document.getElementById('rp-period')?.value||'30');
-  const srcLogs     = allLogs.length ? allLogs : logs;
+  const selUserKey = document.getElementById('rp-user')?.value || '';
+  const periodDays = parseInt(document.getElementById('rp-period')?.value || '30');
 
-  // Filtro de data
-  const cutoff = periodDays > 0 ? (Date.now() - periodDays*24*3600*1000) : 0;
-  function logInPeriod(l) {
-    if(!cutoff) return true;
+  // Fonte de logs — todos disponíveis
+  const srcLogs = allLogs.length ? allLogs : logs.map(l=>({...l, _owner: currentUser?.name||'', enviadoPor: l.enviadoPor||currentUser?.name||''}));
+
+  // ── Parse de data robusto ──
+  // Formato esperado: "dd/mm/yyyy, hh:mm:ss" ou "dd/mm/yyyy hh:mm:ss"
+  function parseLogDate(l) {
     try {
-      const p = (l.time||'').split(/[/,\s:]+/);
-      if(p.length < 3) return true;
-      const d = new Date(+p[2], +p[1]-1, +p[0]);
-      return d.getTime() >= cutoff;
-    } catch(e) { return true; }
+      const t = (l.time||'').replace(',','');
+      const [datePart] = t.trim().split(' ');
+      const [d, m, y] = datePart.split('/').map(Number);
+      if(!d||!m||!y) return null;
+      return new Date(y, m-1, d);
+    } catch(e) { return null; }
   }
 
-  // Agrupado por usuário
-  const byUser = {};
-  srcLogs.forEach(l => {
-    const owner = l.enviadoPor || l._owner || 'Desconhecido';
-    if(!byUser[owner]) byUser[owner] = [];
-    byUser[owner].push(l);
-  });
+  const now       = new Date();
+  const todayStr  = `${now.getDate()}/${now.getMonth()+1}/${now.getFullYear()}`;
+  const cutoffMs  = periodDays > 0 ? (Date.now() - periodDays*24*3600*1000) : 0;
 
-  // Funções de período
-  const now = new Date();
-  function isThisMonth(l) {
-    try {
-      const p = (l.time||'').split(/[/,\s:]+/);
-      return +p[1]-1 === now.getMonth() && +p[2] === now.getFullYear();
-    } catch(e){ return false; }
-  }
-  function isThisWeek(l) {
-    try {
-      const p = (l.time||'').split(/[/,\s:]+/);
-      const d = new Date(+p[2], +p[1]-1, +p[0]);
-      const diff = (now - d) / (1000*3600*24);
-      return diff >= 0 && diff < 7;
-    } catch(e){ return false; }
+  function inPeriod(l) {
+    if(!cutoffMs) return true;
+    const d = parseLogDate(l);
+    return d ? d.getTime() >= cutoffMs : true;
   }
   function isToday(l) {
-    try {
-      const p = (l.time||'').split(/[/,\s:]+/);
-      return +p[0] === now.getDate() && +p[1]-1 === now.getMonth() && +p[2] === now.getFullYear();
-    } catch(e){ return false; }
+    const d = parseLogDate(l);
+    if(!d) return false;
+    return d.getDate()===now.getDate() && d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+  }
+  function isThisWeek(l) {
+    const d = parseLogDate(l);
+    if(!d) return false;
+    const diff = (now - d) / (1000*3600*24);
+    return diff >= 0 && diff < 7;
+  }
+  function isThisMonth(l) {
+    const d = parseLogDate(l);
+    if(!d) return false;
+    return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
   }
 
-  // Reuniões agendadas = leads que chegaram na coluna 'agendado' no CRM
-  const agendadosCRM = crmData.filter(c=>c.status==='agendado'||c.status==='Agendado');
-  const reunioesFeitasCRM = crmData.filter(c=>c.status==='fechado'||c.status==='convertido'||c.status==='Convertido ✓');
+  // ── Normalizar owner de cada log ──
+  // Tentar casar pelo key do usuário (enviadoPor pode ter nome ou key)
+  const nameToKey = {};
+  const keyToName = {};
+  Object.entries(users).forEach(([k,u])=>{ nameToKey[u.name?.toLowerCase()]=k; keyToName[k]=u.name; });
 
-  // Filtrar por usuário selecionado
-  const usersToShow = selUserVal
-    ? [[selUserVal, users[selUserVal]?.name||selUserVal]]
-    : Object.entries(users).map(([k,u])=>[k, u.name]);
+  function getLogOwnerKey(l) {
+    const raw = (l.enviadoPor || l._owner || '').trim();
+    if(!raw) return null;
+    // Tentar match direto por key
+    if(users[raw]) return raw;
+    // Tentar match por nome (case-insensitive)
+    return nameToKey[raw.toLowerCase()] || null;
+  }
 
-  // ── Cards globais ──
-  const allFiltered = srcLogs.filter(logInPeriod);
-  const totalEnv  = allFiltered.filter(l=>l.status==='enviado').length;
-  const totalErr  = allFiltered.filter(l=>l.status==='falha').length;
-  const totalLogs = allFiltered.length;
-  const taxa      = totalLogs ? Math.round(totalEnv/totalLogs*100) : 0;
+  // ── Agrupar logs por key de usuário ──
+  const byUserKey = {}; // { userKey: [log, ...] }
+  srcLogs.forEach(l => {
+    const k = getLogOwnerKey(l);
+    if(!k) return;
+    if(!byUserKey[k]) byUserKey[k] = [];
+    byUserKey[k].push(l);
+  });
+
+  console.log('[RP] byUserKey keys:', Object.keys(byUserKey), 'srcLogs:', srcLogs.length);
+
+  // ── CRM: reuniões por usuário ──
+  // Agendado = qualquer coluna com 'agendado' no id ou label
+  const agendadosIds = new Set(
+    [...CRM_COLS_DEFAULT, ...crmCustomCols]
+      .filter(c=> c.id?.toLowerCase().includes('agendado') || c.label?.toLowerCase().includes('agendado') || c.nome?.toLowerCase().includes('agendado'))
+      .map(c=>c.id)
+  );
+  agendadosIds.add('agendado');
+
+  const convertidosIds = new Set(
+    [...CRM_COLS_DEFAULT, ...crmCustomCols]
+      .filter(c=> c.id?.toLowerCase().includes('conver') || c.id?.toLowerCase().includes('fecha') || c.label?.toLowerCase().includes('conver'))
+      .map(c=>c.id)
+  );
+  convertidosIds.add('fechado'); convertidosIds.add('convertido');
+
+  // Para cada lead no CRM, descobrir qual usuário enviou
+  function getCRMLeadOwnerKey(crmItem) {
+    if(crmItem.addedBy) {
+      const k = users[crmItem.addedBy] ? crmItem.addedBy : nameToKey[crmItem.addedBy?.toLowerCase()];
+      if(k) return k;
+    }
+    // Buscar nos logs quem enviou para este telefone
+    const tel = (crmItem.tel||'').replace(/\D/g,'');
+    const log = srcLogs.find(l=>(l.tel||'').replace(/\D/g,'')=== tel && l.status==='enviado');
+    return log ? getLogOwnerKey(log) : null;
+  }
+
+  // ── Filtrar usuários a exibir ──
+  const usersToShow = selUserKey
+    ? (users[selUserKey] ? [[selUserKey, users[selUserKey]]] : [])
+    : Object.entries(users);
+
+  // ── Cards globais (período filtrado, usuário filtrado) ──
+  let globalLogs = srcLogs.filter(inPeriod);
+  if(selUserKey) globalLogs = globalLogs.filter(l => getLogOwnerKey(l)===selUserKey);
+
+  const gEnv   = globalLogs.filter(l=>l.status==='enviado').length;
+  const gErr   = globalLogs.filter(l=>l.status==='falha').length;
+  const gTotal = globalLogs.length;
+  const gTaxa  = gTotal ? Math.round(gEnv/gTotal*100) : 0;
+
+  let gAgend = 0, gConv = 0;
+  crmData.forEach(c=>{
+    const ownerK = getCRMLeadOwnerKey(c);
+    if(selUserKey && ownerK !== selUserKey) return;
+    if(agendadosIds.has(c.status))   gAgend++;
+    if(convertidosIds.has(c.status)) gConv++;
+  });
 
   const cardsEl = document.getElementById('rp-cards');
   if(cardsEl) cardsEl.innerHTML = `
-    <div class="stat-card"><div class="stat-val" style="color:var(--g)">${totalEnv}</div><div class="stat-label">Enviados no período</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:var(--red)">${totalErr}</div><div class="stat-label">Falhas no período</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:var(--amber)">${agendadosCRM.length}</div><div class="stat-label">Reuniões Agendadas (CRM)</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:var(--blue)">${reunioesFeitasCRM.length}</div><div class="stat-label">Reuniões Concluídas</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:var(--g)">${gEnv}</div><div class="stat-label">Enviados no período</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:var(--red)">${gErr}</div><div class="stat-label">Falhas</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:var(--amber)">${gAgend}</div><div class="stat-label">Reuniões Agendadas</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:var(--blue)">${gConv}</div><div class="stat-label">Reuniões Concluídas</div></div>
   `;
 
-  // ── Tabela por usuário ──
+  // ── Cards por usuário ──
   const tableEl = document.getElementById('rp-table');
   if(!tableEl) return;
 
-  const rows = usersToShow.map(([key, userName]) => {
-    const uLogs = (byUser[userName]||[]).filter(logInPeriod);
-    const env   = uLogs.filter(l=>l.status==='enviado').length;
-    const err   = uLogs.filter(l=>l.status==='falha').length;
-    const mes   = uLogs.filter(l=>l.status==='enviado' && isThisMonth(l)).length;
-    const sem   = uLogs.filter(l=>l.status==='enviado' && isThisWeek(l)).length;
-    const hoje  = uLogs.filter(l=>l.status==='enviado' && isToday(l)).length;
-    const taxa  = uLogs.length ? Math.round(env/uLogs.length*100) : 0;
-    // Reuniões deste usuário (por nome do responsável no CRM)
-    const uAgend = agendadosCRM.filter(c=>c.addedBy===userName || logs.find(l=>l.tel===c.tel&&(l.enviadoPor===userName||l._owner===userName))).length;
-    const uConv  = reunioesFeitasCRM.filter(c=>c.addedBy===userName || logs.find(l=>l.tel===c.tel&&(l.enviadoPor===userName||l._owner===userName))).length;
+  const rows = usersToShow.map(([key, u]) => {
+    const uLogs  = (byUserKey[key]||[]);
+    const uFiltered = uLogs.filter(inPeriod);
+    const env    = uFiltered.filter(l=>l.status==='enviado').length;
+    const err    = uFiltered.filter(l=>l.status==='falha').length;
+    const mes    = uLogs.filter(l=>l.status==='enviado'&&isThisMonth(l)).length;
+    const sem    = uLogs.filter(l=>l.status==='enviado'&&isThisWeek(l)).length;
+    const hoje   = uLogs.filter(l=>l.status==='enviado'&&isToday(l)).length;
+    const total  = uLogs.length; // total geral sem filtro de período
+    const taxa   = uFiltered.length ? Math.round(env/uFiltered.length*100) : 0;
 
-    const av = userName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    let uAgend=0, uConv=0;
+    crmData.forEach(c=>{
+      const ownerK = getCRMLeadOwnerKey(c);
+      if(ownerK !== key) return;
+      if(agendadosIds.has(c.status))   uAgend++;
+      if(convertidosIds.has(c.status)) uConv++;
+    });
+
+    const av = u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const taxaCls = taxa>=80?'badge-green':taxa>=50?'badge-amber':'badge-red';
+
     return `
       <div style="background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
           <div class="user-av" style="width:36px;height:36px;font-size:12px;flex-shrink:0">${av}</div>
-          <div>
-            <div style="font-weight:700;font-size:14px">${esc(userName)}</div>
-            <div style="font-size:11px;color:var(--t3)">${users[key]?.role||'Usuário'}</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:15px">${esc(u.name)}</div>
+            <div style="font-size:11px;color:var(--t3)">${u.role||'Usuário'} · ${total} envios no total</div>
           </div>
-          <div style="margin-left:auto">
-            <span class="badge ${taxa>=80?'badge-green':taxa>=50?'badge-amber':'badge-red'}">${taxa}% sucesso</span>
-          </div>
+          <span class="badge ${taxaCls}" style="font-size:12px">${taxa}% sucesso</span>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px">
-          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
-            <div style="font-size:20px;font-weight:700;color:var(--g)">${env}</div>
-            <div style="font-size:10px;color:var(--t3)">ENVIADOS TOTAL</div>
-          </div>
-          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
-            <div style="font-size:20px;font-weight:700;color:var(--red)">${err}</div>
-            <div style="font-size:10px;color:var(--t3)">ERROS</div>
-          </div>
-          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
-            <div style="font-size:20px;font-weight:700;color:var(--blue)">${mes}</div>
-            <div style="font-size:10px;color:var(--t3)">NO MÊS</div>
-          </div>
-          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
-            <div style="font-size:20px;font-weight:700;color:var(--purple)">${sem}</div>
-            <div style="font-size:10px;color:var(--t3)">NA SEMANA</div>
-          </div>
-          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
-            <div style="font-size:20px;font-weight:700;color:var(--amber)">${hoje}</div>
-            <div style="font-size:10px;color:var(--t3)">HOJE</div>
-          </div>
-          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
-            <div style="font-size:20px;font-weight:700;color:var(--amber)">${uAgend}</div>
-            <div style="font-size:10px;color:var(--t3)">REUNIÕES AGEND.</div>
-          </div>
-          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
-            <div style="font-size:20px;font-weight:700;color:var(--g)">${uConv}</div>
-            <div style="font-size:10px;color:var(--t3)">REUNIÕES FEITAS</div>
-          </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(95px,1fr));gap:8px">
+          ${[
+            {val:env,   label:'ENVIADOS',     color:'var(--g)'},
+            {val:err,   label:'ERROS',        color:'var(--red)'},
+            {val:mes,   label:'NO MÊS',       color:'var(--blue)'},
+            {val:sem,   label:'NA SEMANA',    color:'var(--purple)'},
+            {val:hoje,  label:'HOJE',         color:'var(--amber)'},
+            {val:uAgend,label:'REUNIÕES AG.', color:'var(--amber)'},
+            {val:uConv, label:'REUNIÕES OK',  color:'var(--g)'},
+          ].map(m=>`
+            <div style="text-align:center;padding:10px 6px;background:var(--s2);border-radius:8px">
+              <div style="font-size:22px;font-weight:800;color:${m.color};line-height:1">${m.val}</div>
+              <div style="font-size:9px;color:var(--t3);margin-top:3px;font-family:var(--mono)">${m.label}</div>
+            </div>`).join('')}
         </div>
       </div>`;
   });
 
-  tableEl.innerHTML = rows.join('') || '<p style="color:var(--t3);text-align:center;padding:40px">Nenhum dado encontrado para o período.</p>';
+  tableEl.innerHTML = rows.length
+    ? rows.join('')
+    : '<p style="color:var(--t3);text-align:center;padding:40px">Nenhum dado encontrado.</p>';
 }
 
 function renderHistoricoDisparos() {
