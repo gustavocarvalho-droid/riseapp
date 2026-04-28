@@ -740,6 +740,9 @@ input[type=range]::-moz-range-thumb{
     <div class="nav-item" id="mn-historicodisparos" onclick="go('historicodisparos')">
       <span class="nav-icon">🗂️</span>Histórico de Disparos
     </div>
+    <div class="nav-item" id="mn-relatoriopessoa" onclick="go('relatoriopessoa')">
+      <span class="nav-icon">👤</span>Relatório por Pessoa
+    </div>
     <div class="nav-section">Sistema</div>
     <div class="nav-item" id="mn-numero" onclick="go('numero')">
       <span class="nav-icon">📱</span>Meu Número
@@ -1263,6 +1266,7 @@ input[type=range]::-moz-range-thumb{
           <option value="">Todas as colunas</option>
         </select>
         <button class="btn btn-sm btn-blue" onclick="addCRMCol()">+ Nova coluna</button>
+        <button class="btn btn-sm btn-green" onclick="modalNovoLead()">+ Novo Lead</button>
         <button class="btn btn-sm" onclick="expCRM()">⬇ Exportar CRM</button>
       </div>
       <div class="crm-col-wrap" id="crm-kanban"></div>
@@ -1364,6 +1368,39 @@ input[type=range]::-moz-range-thumb{
       <div id="hd-list"></div>
     </div>
 
+    <!-- ══════════ RELATÓRIO POR PESSOA ══════════ -->
+    <div class="panel" id="panel-relatoriopessoa">
+      <div class="panel-title">👤 Relatório por Pessoa</div>
+      <p class="panel-sub">Desempenho individual por usuário e período</p>
+
+      <!-- Filtros -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:flex-end">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:11px;color:var(--t3)">USUÁRIO</label>
+          <select id="rp-user" class="inp" style="min-width:160px" onchange="renderRelatorioPessoa()">
+            <option value="">Todos os usuários</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:11px;color:var(--t3)">PERÍODO</label>
+          <select id="rp-period" class="inp" onchange="renderRelatorioPessoa()">
+            <option value="7">Últimos 7 dias</option>
+            <option value="15">Últimos 15 dias</option>
+            <option value="30" selected>Últimos 30 dias</option>
+            <option value="90">Últimos 90 dias</option>
+            <option value="0">Todo o período</option>
+          </select>
+        </div>
+        <button class="btn btn-sm btn-blue" onclick="renderRelatorioPessoa()">🔄 Atualizar</button>
+      </div>
+
+      <!-- Cards de métricas -->
+      <div id="rp-cards" class="grid4" style="margin-bottom:20px"></div>
+
+      <!-- Tabela por usuário -->
+      <div id="rp-table"></div>
+    </div>
+
     <!-- ══════════ NÚMERO ══════════ -->
     <div class="panel" id="panel-numero">
       <div class="grid2">
@@ -1460,6 +1497,7 @@ const TABS = {
   crm:      ['CRM','Acompanhe o funil de vendas'],
   relatorio:['Relatório','Histórico de envios'],
   historicodisparos:['Histórico de Disparos','Disparos realizados agrupados por sessão'],
+  relatoriopessoa:  ['Relatório por Pessoa','Desempenho individual por usuário'],
   numero:   ['Meu Número','Status e QR Code'],
   config:   ['Configurações','API e configurações do sistema'],
 };
@@ -1775,7 +1813,7 @@ function go(tab) {
     allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
     renderHistoricoDisparos();
   }
-  if(tab==='conversa') { renderChatList(); preloadRecentChats(); }
+  if(tab==='relatoriopessoa') renderRelatorioPessoa();
   if(tab==='agendamento') { renderAgendamentos(); populateAgTpls(); updAgPrev(); setTimeout(()=>syncAgSliders(),50); }
   if(tab==='config') renderConfig();
   if(tab==='numero') checkNum();
@@ -2315,7 +2353,7 @@ function renderC() {
          <div style="font-size:10px;color:var(--t3);font-family:var(--mono)">${esc((lastDisp.split(',')[1]||'').trim().slice(0,5))}</div>`
       : `<span style="font-size:11px;color:var(--t3)">—</span>`;
 
-    return `<tr>
+    return `<tr data-cid="${c.id}">
       <td><input type="checkbox" class="c-chk" style="width:auto;cursor:pointer" data-id="${c.id}" onchange="updSel()"></td>
       <td>
         <div style="font-weight:600">${esc(c.nome||'—')}</div>
@@ -2394,8 +2432,11 @@ function clrAll() {
   `);
 }
 function _doClrAll(){
-  contacts=[];listas=[];logs=[];crmData=[];fila=[];
-  renderC();renderListas();renderCRM();renderLogs();updBadges();salvarDados();
+  contacts=[];listas=[];logs=[];crmData=[];fila=[];agendamentos=[];
+  invalidateDisparoCache();
+  _filterCacheKey='';
+  renderC();renderListas();renderCRM();renderLogs();updBadges();
+  salvarImediato();
   closeModal();toast('Base de dados limpa');
 }
 
@@ -3160,9 +3201,14 @@ async function fireNext() {
   if(!chatLogs[cId]) chatLogs[cId]=[];
   if(sucesso) chatLogs[cId].push({text,dir:'out',time:ts,ts:Math.floor(Date.now()/1000)});
 
-  // Salvar a cada envio durante o disparo (fireActive=true faz save imediato)
+  // Atualizar UI em tempo real
   salvarDados();
+  // Relatório
   if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
+  // Contatos — atualizar status do contato atual na tabela sem rerender tudo
+  _updateContactRowStatus(cId, sucesso?'enviado':'falha');
+  // Histórico de disparos
+  if(document.getElementById('panel-historicodisparos')?.classList.contains('show')) renderHistoricoDisparos();
   updBadges();
 
   // Sempre agendar o próximo — NUNCA para por erro
@@ -3190,6 +3236,17 @@ async function sendWhatsApp(base, key, inst, tel, text) {
   console.log(`[Send] ${res.status}`, JSON.stringify(respBody).slice(0,120));
 
   return { ok: res.ok, status: res.status, body: respBody, urlUsed: url };
+}
+
+// Atualiza status de um contato na tabela sem re-renderizar tudo (performance durante disparo)
+function _updateContactRowStatus(cId, status) {
+  const row = document.querySelector(`tr[data-cid="${cId}"]`);
+  if(!row) return;
+  const sel = row.querySelector('select.badge');
+  if(!sel) return;
+  sel.value = status;
+  const clsMap = { pendente:'badge-dim', enviado:'badge-green', falha:'badge-red' };
+  sel.className = `badge ${clsMap[status]||'badge-dim'}`;
 }
 
 function buildMsg(tpl,c) {
@@ -3716,6 +3773,79 @@ function addCRM(c) {
   // Atualizar coluna CRM na tabela de contatos se estiver aberta
   if(document.getElementById('panel-contatos')?.classList.contains('show')) renderC();
 }
+function modalNovoLead() {
+  const cols = [
+    {id:'naoresp',label:'Não Respondeu'},
+    {id:'abertura',label:'Abordagem'},
+    {id:'agendado',label:'Agendado'},
+    {id:'followup',label:'Follow-up'},
+    {id:'fechado',label:'Convertido'},
+    {id:'semint',label:'Sem Interesse'},
+    ...crmCustomCols.map(c=>({id:c.id,label:c.nome}))
+  ];
+  showModal(`
+    <div class="modal-title">➕ Novo Lead no CRM</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+      <input id="nl-nome" class="inp" placeholder="Nome *" style="width:100%">
+      <input id="nl-tel" class="inp" placeholder="Telefone *" style="width:100%">
+      <input id="nl-emp" class="inp" placeholder="Empresa" style="width:100%">
+      <input id="nl-cidade" class="inp" placeholder="Cidade" style="width:100%">
+      <select id="nl-col" class="inp" style="width:100%">
+        ${cols.map(c=>`<option value="${c.id}">${c.label}</option>`).join('')}
+      </select>
+      <textarea id="nl-nota" class="inp" placeholder="Observação" rows="2" style="width:100%;resize:vertical"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="_doNovoLead()">✅ Adicionar</button>
+    </div>
+  `);
+  setTimeout(()=>document.getElementById('nl-nome')?.focus(), 100);
+}
+
+function _doNovoLead() {
+  const nome  = document.getElementById('nl-nome')?.value?.trim();
+  const telRaw= document.getElementById('nl-tel')?.value?.trim();
+  const emp   = document.getElementById('nl-emp')?.value?.trim();
+  const cidade= document.getElementById('nl-cidade')?.value?.trim();
+  const col   = document.getElementById('nl-col')?.value;
+  const nota  = document.getElementById('nl-nota')?.value?.trim();
+
+  if(!nome){ toast('Nome obrigatório','warn'); return; }
+  if(!telRaw){ toast('Telefone obrigatório','warn'); return; }
+
+  let tel = telRaw.replace(/\D/g,'');
+  if(tel.length===10||tel.length===11) tel='55'+tel;
+
+  // Criar contato se não existe
+  let contact = contacts.find(c=>c.tel===tel);
+  if(!contact) {
+    contact = { id:Date.now(), tel, nome, empresa:emp||'', cidade:cidade||'', status:'pendente', addedAt:Date.now(), responsavel:currentUser?.name||'' };
+    contacts.push(contact);
+    _filterCacheKey='';
+  }
+
+  // Verificar se já está no CRM
+  if(crmData.find(x=>x.contactId===contact.id)){
+    toast('Este lead já está no CRM','warn'); return;
+  }
+
+  crmData.push({
+    id:uid(), contactId:contact.id,
+    nome, tel: contact.tel, empresa:emp||contact.empresa||'',
+    status:col||'naoresp', nota:nota||'',
+    updatedAt:Date.now(),
+    addedBy: currentUser?.name||''
+  });
+
+  invalidateDisparoCache();
+  salvarImediato();
+  renderCRM();
+  updBadges();
+  closeModal();
+  toast(`Lead "${nome}" adicionado ao CRM ✓`);
+}
+
 function renderCRM() {
   const srch=(document.getElementById('crm-search')?.value||'').toLowerCase();
   const colF=document.getElementById('crm-col-filter')?.value||'';
@@ -4672,6 +4802,156 @@ function _doChangePwdSelf() {
 }
 
 // ── HISTÓRICO DE DISPAROS ──
+// ── RELATÓRIO POR PESSOA ──
+function renderRelatorioPessoa() {
+  const users = getUsers();
+
+  // Popular select de usuários
+  const selUser = document.getElementById('rp-user');
+  if(selUser && selUser.options.length <= 1) {
+    Object.entries(users).forEach(([k,u])=>{
+      const o = document.createElement('option');
+      o.value = k; o.textContent = u.name;
+      selUser.appendChild(o);
+    });
+  }
+
+  const selUserVal  = document.getElementById('rp-user')?.value || '';
+  const periodDays  = parseInt(document.getElementById('rp-period')?.value||'30');
+  const srcLogs     = allLogs.length ? allLogs : logs;
+
+  // Filtro de data
+  const cutoff = periodDays > 0 ? (Date.now() - periodDays*24*3600*1000) : 0;
+  function logInPeriod(l) {
+    if(!cutoff) return true;
+    try {
+      const p = (l.time||'').split(/[/,\s:]+/);
+      if(p.length < 3) return true;
+      const d = new Date(+p[2], +p[1]-1, +p[0]);
+      return d.getTime() >= cutoff;
+    } catch(e) { return true; }
+  }
+
+  // Agrupado por usuário
+  const byUser = {};
+  srcLogs.forEach(l => {
+    const owner = l.enviadoPor || l._owner || 'Desconhecido';
+    if(!byUser[owner]) byUser[owner] = [];
+    byUser[owner].push(l);
+  });
+
+  // Funções de período
+  const now = new Date();
+  function isThisMonth(l) {
+    try {
+      const p = (l.time||'').split(/[/,\s:]+/);
+      return +p[1]-1 === now.getMonth() && +p[2] === now.getFullYear();
+    } catch(e){ return false; }
+  }
+  function isThisWeek(l) {
+    try {
+      const p = (l.time||'').split(/[/,\s:]+/);
+      const d = new Date(+p[2], +p[1]-1, +p[0]);
+      const diff = (now - d) / (1000*3600*24);
+      return diff >= 0 && diff < 7;
+    } catch(e){ return false; }
+  }
+  function isToday(l) {
+    try {
+      const p = (l.time||'').split(/[/,\s:]+/);
+      return +p[0] === now.getDate() && +p[1]-1 === now.getMonth() && +p[2] === now.getFullYear();
+    } catch(e){ return false; }
+  }
+
+  // Reuniões agendadas = leads que chegaram na coluna 'agendado' no CRM
+  const agendadosCRM = crmData.filter(c=>c.status==='agendado'||c.status==='Agendado');
+  const reunioesFeitasCRM = crmData.filter(c=>c.status==='fechado'||c.status==='convertido'||c.status==='Convertido ✓');
+
+  // Filtrar por usuário selecionado
+  const usersToShow = selUserVal
+    ? [[selUserVal, users[selUserVal]?.name||selUserVal]]
+    : Object.entries(users).map(([k,u])=>[k, u.name]);
+
+  // ── Cards globais ──
+  const allFiltered = srcLogs.filter(logInPeriod);
+  const totalEnv  = allFiltered.filter(l=>l.status==='enviado').length;
+  const totalErr  = allFiltered.filter(l=>l.status==='falha').length;
+  const totalLogs = allFiltered.length;
+  const taxa      = totalLogs ? Math.round(totalEnv/totalLogs*100) : 0;
+
+  const cardsEl = document.getElementById('rp-cards');
+  if(cardsEl) cardsEl.innerHTML = `
+    <div class="stat-card"><div class="stat-val" style="color:var(--g)">${totalEnv}</div><div class="stat-label">Enviados no período</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:var(--red)">${totalErr}</div><div class="stat-label">Falhas no período</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:var(--amber)">${agendadosCRM.length}</div><div class="stat-label">Reuniões Agendadas (CRM)</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:var(--blue)">${reunioesFeitasCRM.length}</div><div class="stat-label">Reuniões Concluídas</div></div>
+  `;
+
+  // ── Tabela por usuário ──
+  const tableEl = document.getElementById('rp-table');
+  if(!tableEl) return;
+
+  const rows = usersToShow.map(([key, userName]) => {
+    const uLogs = (byUser[userName]||[]).filter(logInPeriod);
+    const env   = uLogs.filter(l=>l.status==='enviado').length;
+    const err   = uLogs.filter(l=>l.status==='falha').length;
+    const mes   = uLogs.filter(l=>l.status==='enviado' && isThisMonth(l)).length;
+    const sem   = uLogs.filter(l=>l.status==='enviado' && isThisWeek(l)).length;
+    const hoje  = uLogs.filter(l=>l.status==='enviado' && isToday(l)).length;
+    const taxa  = uLogs.length ? Math.round(env/uLogs.length*100) : 0;
+    // Reuniões deste usuário (por nome do responsável no CRM)
+    const uAgend = agendadosCRM.filter(c=>c.addedBy===userName || logs.find(l=>l.tel===c.tel&&(l.enviadoPor===userName||l._owner===userName))).length;
+    const uConv  = reunioesFeitasCRM.filter(c=>c.addedBy===userName || logs.find(l=>l.tel===c.tel&&(l.enviadoPor===userName||l._owner===userName))).length;
+
+    const av = userName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    return `
+      <div style="background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <div class="user-av" style="width:36px;height:36px;font-size:12px;flex-shrink:0">${av}</div>
+          <div>
+            <div style="font-weight:700;font-size:14px">${esc(userName)}</div>
+            <div style="font-size:11px;color:var(--t3)">${users[key]?.role||'Usuário'}</div>
+          </div>
+          <div style="margin-left:auto">
+            <span class="badge ${taxa>=80?'badge-green':taxa>=50?'badge-amber':'badge-red'}">${taxa}% sucesso</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px">
+          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
+            <div style="font-size:20px;font-weight:700;color:var(--g)">${env}</div>
+            <div style="font-size:10px;color:var(--t3)">ENVIADOS TOTAL</div>
+          </div>
+          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
+            <div style="font-size:20px;font-weight:700;color:var(--red)">${err}</div>
+            <div style="font-size:10px;color:var(--t3)">ERROS</div>
+          </div>
+          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
+            <div style="font-size:20px;font-weight:700;color:var(--blue)">${mes}</div>
+            <div style="font-size:10px;color:var(--t3)">NO MÊS</div>
+          </div>
+          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
+            <div style="font-size:20px;font-weight:700;color:var(--purple)">${sem}</div>
+            <div style="font-size:10px;color:var(--t3)">NA SEMANA</div>
+          </div>
+          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
+            <div style="font-size:20px;font-weight:700;color:var(--amber)">${hoje}</div>
+            <div style="font-size:10px;color:var(--t3)">HOJE</div>
+          </div>
+          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
+            <div style="font-size:20px;font-weight:700;color:var(--amber)">${uAgend}</div>
+            <div style="font-size:10px;color:var(--t3)">REUNIÕES AGEND.</div>
+          </div>
+          <div style="text-align:center;padding:8px;background:var(--s2);border-radius:8px">
+            <div style="font-size:20px;font-weight:700;color:var(--g)">${uConv}</div>
+            <div style="font-size:10px;color:var(--t3)">REUNIÕES FEITAS</div>
+          </div>
+        </div>
+      </div>`;
+  });
+
+  tableEl.innerHTML = rows.join('') || '<p style="color:var(--t3);text-align:center;padding:40px">Nenhum dado encontrado para o período.</p>';
+}
+
 function renderHistoricoDisparos() {
   const srch = (document.getElementById('hd-search')?.value||'').toLowerCase();
   const respF = document.getElementById('hd-resp-filter')?.value||'';
