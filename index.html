@@ -1065,6 +1065,7 @@ input[type=range]::-moz-range-thumb{
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-sm btn-blue" onclick="sendTest()">🧪 Testar envio</button>
+            <button class="btn btn-sm" onclick="diagAPI()">🔬 Diagnóstico API</button>
             <button class="btn btn-primary" id="fire-btn" onclick="startFire()" style="flex:1;justify-content:center">🚀 Iniciar Disparo</button>
           </div>
         </div>
@@ -3268,6 +3269,54 @@ function sendMsg(cId) {
   go('conversa');
   setTimeout(()=>{ openChatWindow(cId); openSendModal(); },50);
 }
+async function diagAPI() {
+  const base = getApiBase();
+  const key  = getApiKey();
+  const inst = getInst();
+
+  showModal(`<div class="modal-title">🔬 Diagnóstico API</div><p style="color:var(--t3)">Verificando...</p>`);
+
+  const results = [];
+  const check = async (label, url, opts={}) => {
+    try {
+      const res = await fetch(url, { headers:{'apikey':key,'Content-Type':'application/json'}, ...opts });
+      let body = '';
+      try { body = JSON.stringify(await res.json()); } catch(e) { body = await res.text().catch(()=>''); }
+      results.push({ label, status: res.status, ok: res.ok, body: body.slice(0,300) });
+    } catch(e) {
+      results.push({ label, status:'ERR', ok:false, body: e.message });
+    }
+  };
+
+  await check('1. fetchInstances', `${base}/instance/fetchInstances`);
+  await check('2. connectionState', `${base}/instance/connectionState/${inst}`);
+  await check('3. sendText (teste)', `${base}/message/sendText/${inst}`, {
+    method:'POST',
+    body: JSON.stringify({ number:'5511999999999', textMessage:{ text:'teste diagnóstico' } })
+  });
+
+  const rows = results.map(r=>`
+    <div style="margin-bottom:10px;padding:10px;background:var(--s2);border-radius:8px;border:1px solid ${r.ok?'rgba(0,230,118,.2)':'rgba(255,82,82,.2)'}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-size:16px">${r.ok?'✅':'❌'}</span>
+        <b style="font-size:13px">${r.label}</b>
+        <span class="badge ${r.ok?'badge-green':'badge-red'}" style="margin-left:auto">HTTP ${r.status}</span>
+      </div>
+      <div style="font-size:11px;font-family:var(--mono);color:var(--t3);word-break:break-all;max-height:80px;overflow:auto">${esc(r.body)}</div>
+    </div>`).join('');
+
+  showModal(`
+    <div class="modal-title">🔬 Diagnóstico API</div>
+    <div style="font-size:12px;color:var(--t3);margin-bottom:12px">
+      URL: <b style="color:var(--t)">${esc(base)}</b> · Instância: <b style="color:var(--t)">${esc(inst)}</b> · Key: <b style="color:var(--t)">${key?.slice(0,8)}...</b>
+    </div>
+    ${rows}
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeModal()">Fechar</button>
+    </div>
+  `);
+}
+
 async function sendTest() {
   const num=(document.getElementById('fire-test-num')?.value||'').replace(/\D/g,'');
   if(!num){ toast('Informe o número de teste','warn'); return; }
