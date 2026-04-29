@@ -3153,7 +3153,13 @@ async function fireNext() {
       if(typeof erroMotivo === 'object') erroMotivo = JSON.stringify(erroMotivo);
 
       const erroLower = String(erroMotivo).toLowerCase();
-      if(erroLower.includes('not in whatsapp')
+
+      // exists:false = número não é WhatsApp (verificação prévia da API)
+      const msgArr2 = respBody?.response?.message;
+      const firstMsg2 = Array.isArray(msgArr2) ? msgArr2[0] : null;
+      if(respBody?._notWhatsapp || (firstMsg2 && firstMsg2.exists === false)) {
+        erroMotivo = 'Não é WhatsApp';
+      } else if(erroLower.includes('not in whatsapp')
         || erroLower.includes('not a whatsapp')
         || erroLower.includes('does not exist')
         || erroLower.includes('no exists')) {
@@ -3223,27 +3229,45 @@ async function sendWhatsApp(base, key, inst, tel, text) {
   const number = normalizeTel(tel);
   const url = `${base}/message/sendText/${inst}`;
 
-  // Evolution API v0.4.x usa { number, textMessage: { text } }
-  const body = JSON.stringify({ number, textMessage: { text } });
+  const makeBody = (num) => JSON.stringify({
+    number: num,
+    textMessage: { text },
+    options: { delay: 1200, presence: 'composing' }
+  });
 
-  console.log(`[Send] POST ${url}`);
-  console.log(`[Send] number=${number} key=${key?.slice(0,8)}...`);
+  console.log(`[Send] POST ${url} → ${number}`);
 
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'apikey': key },
-    body
+    body: makeBody(number)
   });
 
   let respBody = null;
   try { respBody = await res.json(); } catch(e) {}
 
-  console.log(`[Send] ${res.status}`, JSON.stringify(respBody||{}).slice(0,200));
-
-  // Se retornou 400 — logar body completo para diagnóstico
-  if(!res.ok) {
-    console.error(`[Send] ERRO ${res.status} para ${number}:`, JSON.stringify(respBody));
+  // exists:false = API verificou o número e disse que não é WA
+  // Tentar novamente com @s.whatsapp.net (bypass da verificação)
+  const msgArr = respBody?.response?.message;
+  const firstMsg = Array.isArray(msgArr) ? msgArr[0] : null;
+  if(!res.ok && firstMsg && firstMsg.exists === false) {
+    const jid = `${number}@s.whatsapp.net`;
+    console.log(`[Send] Retry com JID: ${jid}`);
+    const res2 = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': key },
+      body: makeBody(jid)
+    });
+    let respBody2 = null;
+    try { respBody2 = await res2.json(); } catch(e) {}
+    console.log(`[Send] Retry ${res2.status}`, JSON.stringify(respBody2||{}).slice(0,150));
+    if(res2.ok) return { ok: true, status: res2.status, body: respBody2, urlUsed: url };
+    // Retry também falhou — marcar como não WhatsApp
+    return { ok: false, status: 400, body: { _notWhatsapp: true }, urlUsed: url };
   }
+
+  console.log(`[Send] ${res.status}`, JSON.stringify(respBody||{}).slice(0,150));
+  if(!res.ok) console.error(`[Send] ERRO ${res.status} para ${number}:`, JSON.stringify(respBody));
 
   return { ok: res.ok, status: res.status, body: respBody, urlUsed: url };
 }
