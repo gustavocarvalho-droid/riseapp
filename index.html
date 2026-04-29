@@ -2752,11 +2752,8 @@ function renderChatList() {
 
 // Abrir conversa por telefone (para inbox contacts)
 function openChatWindow_tel(telOrId) {
-  // Tentar achar por id primeiro
   let c = contacts.find(x=>String(x.id)===String(telOrId));
-  // Tentar por tel
   if(!c) c = contacts.find(x=>x.tel===telOrId);
-  // Tentar inbox
   if(!c) c = inboxContacts.find(x=>x.tel===telOrId||String(x.id)===String(telOrId));
   if(!c) return;
   openChatWindowObj(c);
@@ -2769,34 +2766,13 @@ function openChatWindowObj(c) {
   document.getElementById('chat-tel').textContent = fmt(c.tel)+(c.empresa?` • ${c.empresa}`:'');
   document.getElementById('chat-send-btn').style.display='';
   document.getElementById('chat-footer').style.display='';
-  renderChatHistory();
-  fetchChatHistory(c.tel);
-  renderChatList();
+  // Usar novo sistema — busca da Evolution API + merge local
+  openChat(c.id);
 }
 function openChatWindow(id) {
-  const c = contacts.find(x=>x.id===id);
+  const c = contacts.find(x=>x.id===id)||inboxContacts.find(x=>x.id===id);
   if(!c) return;
   openChatWindowObj(c);
-}
-function renderChatHistory() {
-  const body = document.getElementById('chat-body');
-  // Try by id first, then by tel
-  const tel = (chatContact?.tel||'').replace(/[^0-9]/g,'');
-  const cId = chatContact?.id||tel;
-  // Try multiple keys: id, tel, inbox_tel, inbox_lid
-  const msgs = chatLogs[cId] || chatLogs[tel] || chatLogs['inbox_'+tel]
-    || chatLogs['inbox_'+cId] || chatLogs['lid_'+tel] || [];
-  if(!msgs.length){
-    body.innerHTML=`<div class="empty-state"><span class="empty-icon">💬</span><p>Nenhuma mensagem ainda. Clique em "Enviar Mensagem" para iniciar.</p></div>`;
-    return;
-  }
-  body.innerHTML = msgs.map(m=>`
-    <div class="msg-bubble msg-${m.dir||'out'}">
-      ${esc(m.text)}
-      <div class="msg-time">${m.time}</div>
-    </div>
-  `).join('');
-  body.scrollTop = body.scrollHeight;
 }
 function sendChatMsg() {
   const inp = document.getElementById('chat-input');
@@ -5685,337 +5661,262 @@ async function startPolling() {
   pollTimer = setInterval(pollMessages, 12000);
 }
 
-async function pollMessages() {
-  if(document.hidden) return; // não consumir recursos em segundo plano
-  const base=getApiBase();const key=getApiKey();const inst=getInst();
-  if(!base||!key||!inst) return;
+// ══════════════════════════════════════════
+// SISTEMA DE CONVERSAS — Evolution API v1.7
+// Fonte: MongoDB da Evolution API (histórico real)
+// Fallback: chatLogs locais (mensagens enviadas pelo Rise WA)
+// ══════════════════════════════════════════
 
-  // Buscar mensagens recebidas desde o último poll
-  const cutoffTs = Math.floor(lastPollTs/1000) - 5; // 5s de margem
-  try {
-    const res = await fetch(`${base}/chat/findMessages/${inst}`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key},
-      body: JSON.stringify({
-        where: {
-          key: { fromMe: false },
-          messageTimestamp: { $gte: cutoffTs }
-        },
-        limit: 50
-      })
-    });
-    if(res.ok) {
-      const d = await res.json();
-      const msgs = Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
-      let hasNew = false;
-      msgs.forEach(msg=>{
-        const ts = msg.messageTimestamp||0;
-        if(ts < cutoffTs) return;
-        const msgId = msg.key?.id;
-        if(msgId && processedMsgIds.has(msgId)) return;
-        if(msgId) processedMsgIds.add(msgId);
-        if(processedMsgIds.size>1000) processedMsgIds=new Set([...processedMsgIds].slice(-500));
-        receberMensagem({data:msg});
-        hasNew = true;
-      });
-      lastPollTs = Date.now();
-      // Recarregar histórico da conversa aberta para pegar fromMe correto
-      if(hasNew && chatContact) {
-        setTimeout(()=>fetchChatHistory(chatContact.tel||chatContact.id), 500);
-      }
-      return;
-    }
-  } catch(e){}
-
-  // Fallback: busca sem filtro de timestamp, filtra localmente
-  try {
-    const res2 = await fetch(`${base}/chat/findMessages/${inst}`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key},
-      body: JSON.stringify({
-        where: { key: { fromMe: false } },
-        limit: 50
-      })
-    });
-    if(res2.ok) {
-      const d = await res2.json();
-      const msgs = Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
-      let hasNew = false;
-      msgs.forEach(msg=>{
-        const ts = msg.messageTimestamp||0;
-        if(ts < cutoffTs) return;
-        const msgId = msg.key?.id;
-        if(msgId && processedMsgIds.has(msgId)) return;
-        if(msgId) processedMsgIds.add(msgId);
-        receberMensagem({data:msg});
-        hasNew = true;
-      });
-      lastPollTs = Date.now();
-      if(hasNew && chatContact) {
-        setTimeout(()=>fetchChatHistory(chatContact.tel||chatContact.id), 500);
-      }
-    }
-  } catch(e){}
+// Converte mensagem da Evolution API para formato interno
+function _convertEvolutionMsg(m) {
+  if(!m) return null;
+  const text = m.message?.conversation
+    || m.message?.extendedTextMessage?.text
+    || m.message?.imageMessage?.caption
+    || m.message?.videoMessage?.caption
+    || m.message?.documentMessage?.caption
+    || (m.message?.imageMessage ? '[Imagem]' : null)
+    || (m.message?.videoMessage ? '[Vídeo]' : null)
+    || (m.message?.audioMessage ? '[Áudio]' : null)
+    || (m.message?.documentMessage ? '[Documento]' : null)
+    || (m.message?.stickerMessage ? '[Sticker]' : null)
+    || (m.message?.locationMessage ? '[Localização]' : null)
+    || '';
+  if(!text) return null;
+  return {
+    id: m.key?.id || uid(),
+    text,
+    dir: m.key?.fromMe ? 'out' : 'in',
+    time: m.messageTimestamp
+      ? new Date(m.messageTimestamp * 1000).toLocaleString('pt-BR')
+      : tsNow(),
+    ts: m.messageTimestamp || 0,
+    status: m.status || '',
+    fromMe: !!m.key?.fromMe
+  };
 }
 
-// Buscar histórico de uma conversa específica
-async function fetchChatHistory(tel) {
-  const base=getApiBase();const key=getApiKey();const inst=getInst();
-  if(!base||!key||!inst) return;
+// Buscar histórico de mensagens da Evolution API para um contato
+async function fetchChatFromEvolution(tel) {
+  const base = getApiBase(); const key = getApiKey(); const inst = getInst();
+  if(!base||!key||!inst) return [];
 
-  const telClean = tel.replace(/[^0-9]/g,'');
+  const telClean = tel.replace(/\D/g,'');
   const jid = telClean + '@s.whatsapp.net';
-  const contact = contacts.find(c=>c.tel===telClean||c.tel===tel);
-  const cId = contact?.id||telClean;
 
-  // Loading
-  const body = document.getElementById('chat-body');
-  if(body && (!chatLogs[cId]||!chatLogs[cId].length)) {
-    body.innerHTML = '<div class="empty-state"><span class="empty-icon">⏳</span><p>Carregando mensagens...</p></div>';
-  }
-
-  function extractMsgs(d) {
-    let msgs = [];
-    if(Array.isArray(d)) msgs = d;
-    else if(d?.messages?.records) msgs = d.messages.records;
-    else if(Array.isArray(d?.messages)) msgs = d.messages;
-    else if(d?.data) msgs = Array.isArray(d.data)?d.data:[];
-    // Aceitar variações: @s.whatsapp.net, @c.us, @lid, com/sem 55
-    return msgs.filter(m => {
-      const rawJid = m.key?.remoteJid||'';
-      // Para @lid não tem número — aceitar por participante ou owner
-      if(rawJid.includes('@lid')) return true; // aceitar @lid do contato aberto
-      const rjid = rawJid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'');
-      const clean = telClean.replace(/^55/,'');
-      const rclean = rjid.replace(/^55/,'');
-      return rjid===telClean || rclean===clean || rjid.endsWith(clean) || telClean.endsWith(rclean);
-    });
-  }
-
-  function convertMsg(m) {
-    // Ignorar mensagens com message vazio (sem conteúdo real)
-    if(!m.message || Object.keys(m.message).length === 0) return null;
-
-    const text = m.message?.conversation
-      || m.message?.extendedTextMessage?.text
-      || m.message?.extendedTextMessage?.canonicalUrl
-      || m.message?.imageMessage?.caption
-      || m.message?.buttonsResponseMessage?.selectedDisplayText
-      || m.message?.listResponseMessage?.title
-      || m.message?.templateMessage?.hydratedTemplate?.hydratedContentText
-      || (m.message?.imageMessage?'🖼 Imagem':'')
-      || (m.message?.videoMessage?'🎥 Vídeo':'')
-      || (m.message?.audioMessage?'🎵 Áudio':'')
-      || (m.message?.stickerMessage?'🎭 Sticker':'')
-      || (m.message?.reactionMessage?'👍 Reação':'')
-      || (m.message?.documentMessage?('📄 '+(m.message.documentMessage.fileName||'Documento')):'')
-      || (m.message?.protocolMessage?null:'')
-      || '[mídia]';
-    if(!text || text === null) return null;
-    return {
-      id: m.key?.id||uid(),
-      text,
-      dir: m.key?.fromMe?'out':'in',
-      time: m.messageTimestamp
-        ? new Date(m.messageTimestamp*1000).toLocaleString('pt-BR')
-        : tsNow(),
-      ts: m.messageTimestamp||0
-    };
-  }
-
-  let apiMsgs = [];
-
-  // Evolution API v1.7.x — endpoint correto
-  // POST /chat/findMessages/{instance}
-  try {
-    const r = await fetch(`${base}/chat/findMessages/${inst}`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key},
-      body: JSON.stringify({
-        where: { key: { remoteJid: jid } },
-        limit: 200
-      })
-    });
-    if(r.ok) {
+  // Tentar com o JID padrão primeiro
+  const tryFetch = async (jidToTry) => {
+    try {
+      const r = await fetch(`${base}/chat/findMessages/${inst}`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','apikey':key},
+        body: JSON.stringify({ where: { key: { remoteJid: jidToTry } }, limit: 100 })
+      });
+      if(!r.ok) return [];
       const d = await r.json();
-      apiMsgs = extractMsgs(d);
-      console.log('findMessages result:', apiMsgs.length, 'msgs for', jid);
-    }
-  } catch(e) { console.warn('fetchChatHistory err:', e); }
+      // Evolution v1.7 retorna { messages: { records: [...] } } ou array direto
+      let arr = [];
+      if(Array.isArray(d)) arr = d;
+      else if(d?.messages?.records) arr = d.messages.records;
+      else if(Array.isArray(d?.messages)) arr = d.messages;
+      else if(Array.isArray(d?.data)) arr = d.data;
+      return arr;
+    } catch(e) { return []; }
+  };
 
-  // Alternativa: /messages/findMessages (outro path usado em algumas versões)
-  if(!apiMsgs.length) {
-    try {
-      const r2 = await fetch(`${base}/messages/findMessages/${inst}`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json','apikey':key},
-        body: JSON.stringify({
-          where: { key: { remoteJid: jid } },
-          limit: 50
-        })
-      });
-      if(r2.ok) {
-        const d = await r2.json();
-        apiMsgs = extractMsgs(d);
-      }
-    } catch(e) {}
+  let msgs = await tryFetch(jid);
+
+  // Tentar sem DDI se não encontrou
+  if(!msgs.length && telClean.startsWith('55')) {
+    msgs = await tryFetch(telClean.slice(2) + '@s.whatsapp.net');
+  }
+  // Tentar com DDI se não tinha
+  if(!msgs.length && !telClean.startsWith('55')) {
+    msgs = await tryFetch('55' + telClean + '@s.whatsapp.net');
   }
 
-  // Se ainda não encontrou — buscar todos e filtrar localmente
-  if(!apiMsgs.length) {
-    try {
-      const r3 = await fetch(`${base}/chat/findMessages/${inst}`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json','apikey':key},
-        body: JSON.stringify({ where:{}, limit: 200 })
-      });
-      if(r3.ok) {
-        const d = await r3.json();
-        // Filtrar localmente por este número
-        let all = [];
-        if(Array.isArray(d)) all=d;
-        else if(d?.messages?.records) all=d.messages.records;
-        else if(Array.isArray(d?.messages)) all=d.messages;
-        apiMsgs = all.filter(m=>{
-          const rjid=m.key?.remoteJid||'';
-          return rjid===jid||rjid.startsWith(telClean);
-        });
-      }
-    } catch(e) {}
-  }
-
-  if(apiMsgs.length) {
-    const converted = apiMsgs
-      .map(convertMsg)
-      .filter(Boolean)
-      .sort((a,b)=>a.ts-b.ts);
-
-    if(converted.length) {
-      chatLogs[cId] = converted;
-      // Also store by tel for easy lookup
-      chatLogs[telClean] = converted;
-      converted.filter(m=>m.dir==='in').forEach(m=>{
-        if(!processedMsgIds.has(m.id)) processedMsgIds.add(m.id);
-      });
-    }
-  }
-
-  if(!apiMsgs.length) {
-    // API não tem histórico — mostrar aviso mas manter mensagens locais
-    const existingLocal = chatLogs[cId]||[];
-    if(!existingLocal.length) {
-      const b=document.getElementById('chat-body');
-      if(b&&chatContact?.id===cId) {
-        b.innerHTML=`<div class="empty-state">
-          <span class="empty-icon">💬</span>
-          <p>Histórico não disponível na API</p>
-          <div style="font-size:11px;color:var(--t3);margin-top:8px;max-width:280px">
-            A Evolution API v1.7 armazena mensagens apenas quando há banco de dados (MongoDB/PostgreSQL) configurado.
-            As mensagens enviadas pelo Rise WA aparecem aqui.
-          </div>
-        </div>`;
-        return;
-      }
-    }
-  }
-
-  if(chatContact?.id===cId||chatContact?.tel===telClean||chatContact?.tel===tel) {
-    renderChatHistory();
-  }
+  return msgs
+    .map(_convertEvolutionMsg)
+    .filter(Boolean)
+    .sort((a,b) => a.ts - b.ts);
 }
 
-// ── CARREGAR TODOS OS CHATS DA API ──
+// Abrir conversa com um contato — busca histórico da Evolution + merge com local
+async function openChat(id) {
+  chatContact = contacts.find(c=>c.id===id) || inboxContacts.find(c=>c.id===id);
+  if(!chatContact) { toast('Contato não encontrado','err'); return; }
+
+  // Mostrar tela de carregamento
+  const body = document.getElementById('chat-body');
+  if(body) body.innerHTML = `<div class="empty-state"><span class="empty-icon" style="animation:spin 1s linear infinite">⏳</span><p>Carregando histórico...</p></div>`;
+
+  // Atualizar header
+  const h = document.getElementById('chat-contact-name');
+  const s = document.getElementById('chat-contact-sub');
+  if(h) h.textContent = chatContact.nome || fmt(chatContact.tel);
+  if(s) s.textContent = fmt(chatContact.tel) + (chatContact.empresa ? ' · ' + chatContact.empresa : '');
+
+  const cId = chatContact.id;
+  const tel = (chatContact.tel||'').replace(/\D/g,'');
+
+  // Buscar da Evolution API (fonte principal — MongoDB)
+  const evolutionMsgs = await fetchChatFromEvolution(tel);
+  console.log(`[Chat] Evolution API: ${evolutionMsgs.length} msgs para ${tel}`);
+
+  // Mensagens locais (salvas no Rise WA — fallback)
+  const localMsgs = chatLogs[cId] || chatLogs[tel] || [];
+
+  // Merge: Evolution + locais (sem duplicar por id)
+  const allMsgsMap = {};
+  [...localMsgs, ...evolutionMsgs].forEach(m => {
+    if(m && m.id) allMsgsMap[m.id] = m;
+  });
+  const merged = Object.values(allMsgsMap).sort((a,b) => a.ts - b.ts);
+
+  // Atualizar cache local com o resultado completo
+  if(merged.length > 0) {
+    chatLogs[cId] = merged;
+    chatLogs[tel] = merged;
+  }
+
+  renderChatHistory();
+  document.getElementById('chat-body')?.scrollTo(0, 999999);
+}
+
+// Renderizar histórico da conversa ativa
+function renderChatHistory() {
+  const body = document.getElementById('chat-body');
+  if(!body || !chatContact) return;
+
+  const cId = chatContact.id;
+  const tel = (chatContact.tel||'').replace(/\D/g,'');
+  const msgs = chatLogs[cId] || chatLogs[tel] || [];
+
+  if(!msgs.length) {
+    body.innerHTML = `<div class="empty-state">
+      <span class="empty-icon">💬</span>
+      <p>Nenhuma mensagem ainda</p>
+      <div style="font-size:11px;color:var(--t3);margin-top:8px">
+        As mensagens enviadas pelo Rise WA aparecem aqui quando a Evolution API tem MongoDB configurado.
+      </div>
+    </div>`;
+    return;
+  }
+
+  // Agrupar por data
+  let lastDate = '';
+  const html = msgs.map(m => {
+    const datePart = (m.time||'').split(',')[0] || '';
+    let dateDiv = '';
+    if(datePart && datePart !== lastDate) {
+      lastDate = datePart;
+      dateDiv = `<div style="text-align:center;margin:10px 0 6px;font-size:11px;color:var(--t3)">${datePart}</div>`;
+    }
+    const timePart = (m.time||'').split(',')[1]?.trim() || m.time || '';
+    const statusIcon = m.dir==='out' ? (m.status==='READ'?'✓✓':m.status==='DELIVERY_ACK'?'✓✓':'✓') : '';
+    return `${dateDiv}<div class="msg-bubble msg-${m.dir||'out'}">
+      ${esc(m.text)}
+      <div class="msg-time">${timePart} ${statusIcon}</div>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = html;
+  body.scrollTop = body.scrollHeight;
+}
+
+// Carregar lista de chats da Evolution API
 async function loadAllChats() {
-  const base=getApiBase();const key=getApiKey();const inst=getInst();
+  const base=getApiBase(); const key=getApiKey(); const inst=getInst();
   if(!base||!key||!inst) return;
   try {
-    // Buscar lista de chats ativos
     const res = await fetch(`${base}/chat/findChats/${inst}`, {
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key},
       body: JSON.stringify({})
     });
-    if(!res.ok) return; // 404 = endpoint não disponível nesta versão, ignorar silenciosamente
+    if(!res.ok) return;
     const d = await res.json();
-    const chats = Array.isArray(d)?d:(d?.chats||d?.data||[]);
+    const chats = Array.isArray(d) ? d : (d?.chats||d?.data||[]);
 
+    let novos = 0;
     chats.forEach(chat => {
       const rjid = chat.id||chat.remoteJid||'';
       if(rjid.includes('@g.us')) return; // ignorar grupos
-      const tel = rjid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'');
+      const tel = rjid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/\D/g,'');
       if(!tel||tel.length<8) return;
 
       // Verificar se já existe nos contatos
-      const exists = contacts.find(c=>{
-        const ct=(c.tel||'').replace(/[^0-9]/g,'');
-        const clean=tel.replace(/^55/,'');
-        const ctclean=ct.replace(/^55/,'');
-        return ct===tel||ctclean===clean||ct.endsWith(clean);
+      const existe = contacts.find(c => {
+        const ct = (c.tel||'').replace(/\D/g,'');
+        return ct===tel || ct.replace(/^55/,'')===tel.replace(/^55/,'');
       });
 
-      // Se não existe nos contatos, adicionar ao inbox
-      if(!exists) {
-        const existInbox = inboxContacts.find(x=>{
-          const xt=(x.tel||'').replace(/[^0-9]/g,'');
-          return xt===tel||xt.endsWith(tel.replace(/^55/,''));
+      // Se tem resposta recebida e não está nos contatos — adicionar ao inbox
+      if(!existe) {
+        const jaNoInbox = inboxContacts.find(x => {
+          const xt=(x.tel||'').replace(/\D/g,'');
+          return xt===tel||xt.replace(/^55/,'')===tel.replace(/^55/,'');
         });
-        if(!existInbox) {
-          const name = chat.name||chat.pushName||fmt(tel);
+        if(!jaNoInbox) {
           inboxContacts.push({
-            id:'inbox_'+tel, tel, nome:name,
+            id:'inbox_'+tel, tel,
+            nome: chat.name||chat.pushName||fmt(tel),
             empresa:'', status:'inbox', addedAt:Date.now()
           });
+          novos++;
         }
       }
     });
 
-    if(inboxContacts.length > 0) {
-      renderChatList();
-    }
-  } catch(e) { console.warn('loadAllChats error:', e); }
+    if(novos > 0 || inboxContacts.length > 0) renderChatList();
+  } catch(e) { console.warn('[loadAllChats]', e.message); }
 }
 
-// Pré-carregar conversas recentes ao abrir aba
+// Pré-carregar últimas mensagens dos contatos enviados recentemente
 let preloadDone = false;
 async function preloadRecentChats() {
   if(preloadDone) return;
   preloadDone = true;
-  const base=getApiBase();const key=getApiKey();const inst=getInst();
-  if(!base||!key||!inst) return;
-  // Buscar os últimos 20 contatos com status enviado
-  const recent = contacts.filter(c=>c.status==='enviado').slice(0,20);
+  // Buscar lista de chats da API para popular o inbox
+  await loadAllChats();
+  // Pré-carregar última mensagem dos 10 contatos mais recentes com envio
+  const recent = contacts
+    .filter(c=>c.status==='enviado')
+    .sort((a,b)=>(b.addedAt||0)-(a.addedAt||0))
+    .slice(0, 10);
   for(const c of recent) {
-    if(chatLogs[c.id]?.length) continue; // já tem histórico
-    const tel = (c.tel||'').replace(/[^0-9]/g,'');
-    const jid = tel+'@s.whatsapp.net';
-    try {
-      const r = await fetch(`${base}/chat/findMessages/${inst}`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json','apikey':key},
-        body:JSON.stringify({where:{key:{remoteJid:jid}},limit:5})
-      });
-      if(!r.ok) continue;
-      const d = await r.json();
-      let msgs = Array.isArray(d)?d:(d?.messages?.records||d?.messages||[]);
-      msgs = msgs.filter(m=>{
-        const rjid=(m.key?.remoteJid||'').replace(/[^0-9]/g,'');
-        const clean=tel.replace(/^55/,'');
-        return rjid===tel||rjid.replace(/^55/,'')=== clean;
-      });
-      if(msgs.length) {
-        const converted = msgs.map(m=>({
-          id:m.key?.id||uid(),
-          text:m.message?.conversation||m.message?.extendedTextMessage?.text||'[mídia]',
-          dir:m.key?.fromMe?'out':'in',
-          time:m.messageTimestamp?new Date(m.messageTimestamp*1000).toLocaleString('pt-BR'):tsNow(),
-          ts:m.messageTimestamp||0
-        })).filter(m=>m.text&&m.text!=='[mídia]'||true).sort((a,b)=>a.ts-b.ts);
-        if(converted.length) { chatLogs[c.id]=converted; chatLogs[tel]=converted; }
-      }
-    } catch(e){}
+    if(chatLogs[c.id]?.length) continue;
+    const msgs = await fetchChatFromEvolution(c.tel);
+    if(msgs.length) {
+      const tel = (c.tel||'').replace(/\D/g,'');
+      chatLogs[c.id] = msgs;
+      chatLogs[tel] = msgs;
+    }
   }
   renderChatList();
 }
+
+// Poll de mensagens recebidas — atualizar conversa aberta em tempo real
+async function pollMessages() {
+  if(document.hidden) return;
+  const base=getApiBase(); const key=getApiKey(); const inst=getInst();
+  if(!base||!key||!inst) return;
+
+  // Se há uma conversa aberta, atualizar ela
+  if(chatContact) {
+    const tel = (chatContact.tel||'').replace(/\D/g,'');
+    const cId = chatContact.id;
+    const antes = (chatLogs[cId]||[]).length;
+    const msgs = await fetchChatFromEvolution(tel);
+    if(msgs.length > antes) {
+      chatLogs[cId] = msgs;
+      chatLogs[tel] = msgs;
+      renderChatHistory();
+      renderChatList();
+    }
+  }
+}
+
 </script>
 </body>
 </html>
