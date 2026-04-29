@@ -3221,9 +3221,12 @@ async function fireNext() {
 async function sendWhatsApp(base, key, inst, tel, text) {
   const number = normalizeTel(tel);
   const url = `${base}/message/sendText/${inst}`;
+
+  // Evolution API v0.4.x usa { number, textMessage: { text } }
   const body = JSON.stringify({ number, textMessage: { text } });
 
-  console.log(`[Send] POST ${url} → ${number}`);
+  console.log(`[Send] POST ${url}`);
+  console.log(`[Send] number=${number} key=${key?.slice(0,8)}...`);
 
   const res = await fetch(url, {
     method: 'POST',
@@ -3233,7 +3236,13 @@ async function sendWhatsApp(base, key, inst, tel, text) {
 
   let respBody = null;
   try { respBody = await res.json(); } catch(e) {}
-  console.log(`[Send] ${res.status}`, JSON.stringify(respBody).slice(0,120));
+
+  console.log(`[Send] ${res.status}`, JSON.stringify(respBody||{}).slice(0,200));
+
+  // Se retornou 400 — logar body completo para diagnóstico
+  if(!res.ok) {
+    console.error(`[Send] ERRO ${res.status} para ${number}:`, JSON.stringify(respBody));
+  }
 
   return { ok: res.ok, status: res.status, body: respBody, urlUsed: url };
 }
