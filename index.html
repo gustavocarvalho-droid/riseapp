@@ -734,9 +734,6 @@ input[type=range]::-moz-range-thumb{
       <span class="nav-icon">📊</span>CRM
       <span class="nav-badge amber" id="nb-crm" style="display:none">0</span>
     </div>
-    <div class="nav-item" id="mn-relatorio" onclick="go('relatorio')">
-      <span class="nav-icon">📈</span>Relatório
-    </div>
     <div class="nav-item" id="mn-historicodisparos" onclick="go('historicodisparos')">
       <span class="nav-icon">🗂️</span>Histórico de Disparos
     </div>
@@ -1273,66 +1270,6 @@ input[type=range]::-moz-range-thumb{
       <div class="crm-col-wrap" id="crm-kanban"></div>
     </div>
 
-    <!-- ══════════ RELATÓRIO ══════════ -->
-    <div class="panel" id="panel-relatorio">
-      <div id="rlog-master-banner" style="display:none;background:rgba(0,230,118,.07);border:1px solid var(--bd);border-radius:10px;padding:10px 16px;margin-bottom:14px;font-size:12px;color:var(--g);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-size:16px">🔑</span>
-        <span style="flex:1"><b>Modo Master</b> — você está vendo os logs de <b>todos os usuários</b>. Use o filtro à direita para ver por usuário.</span>
-        <button id="btn-migrar-shared" class="btn btn-xs btn-amber" onclick="migrarDoShared()">🔄 Importar dados antigos (shared)</button>
-      </div>
-      <div class="grid4 mb-4">
-        <div class="stat-card stat-green">
-          <div class="stat-num" id="rlog-env">0</div>
-          <div class="stat-label">Enviados</div>
-        </div>
-        <div class="stat-card stat-red">
-          <div class="stat-num" id="rlog-err">0</div>
-          <div class="stat-label">Falhas</div>
-        </div>
-        <div class="stat-card stat-blue">
-          <div class="stat-num" id="rlog-total">0</div>
-          <div class="stat-label">Total logs</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-num" id="rlog-rate" style="color:var(--t)">0%</div>
-          <div class="stat-label">Taxa sucesso</div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title"><span class="icon">📋</span>Log de Envios</div>
-        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-sm" onclick="expLogs()">⬇ Exportar CSV</button>
-          <button class="btn btn-sm btn-amber" onclick="reenviarFalhas()">🔁 Reenviar falhas</button>
-          <button class="btn btn-sm btn-danger" onclick="limparLogs()">🗑 Limpar logs</button>
-          
-          <div id="rlog-resp-wrap" style="display:none;margin-left:auto">
-            <select id="rlog-resp-filter" style="width:auto;min-width:160px;font-size:12px" onchange="renderLogs()">
-              <option value="">👥 Todos os usuários</option>
-              <option value="Gustavo C.">Gustavo C.</option>
-              <option value="Giulia B.">Giulia B.</option>
-              <option value="Larissa P.">Larissa P.</option>
-            </select>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Data/Hora</th>
-                <th>Nome</th>
-                <th>Telefone</th>
-                <th>Enviado por</th>
-                <th>Status</th>
-                <th>Mensagem</th>
-                <th>Erro</th>
-              </tr>
-            </thead>
-            <tbody id="log-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
     <!-- ══════════ HISTÓRICO DE DISPAROS ══════════ -->
     <div class="panel" id="panel-historicodisparos">
       <div class="grid4 mb-4">
@@ -1383,14 +1320,22 @@ input[type=range]::-moz-range-thumb{
           </select>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px">
-          <label style="font-size:11px;color:var(--t3)">PERÍODO</label>
-          <select id="rp-period" class="inp" onchange="renderRelatorioPessoa()">
-            <option value="7">Últimos 7 dias</option>
-            <option value="15">Últimos 15 dias</option>
-            <option value="30" selected>Últimos 30 dias</option>
-            <option value="90">Últimos 90 dias</option>
-            <option value="0">Todo o período</option>
-          </select>
+          <label style="font-size:11px;color:var(--t3)">DATA INÍCIO</label>
+          <input type="date" id="rp-date-from" class="inp" onchange="renderRelatorioPessoa()">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:11px;color:var(--t3)">DATA FIM</label>
+          <input type="date" id="rp-date-to" class="inp" onchange="renderRelatorioPessoa()">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:11px;color:var(--t3)">ATALHOS</label>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-xs" onclick="rpSetPeriod(7)">7d</button>
+            <button class="btn btn-xs" onclick="rpSetPeriod(15)">15d</button>
+            <button class="btn btn-xs" onclick="rpSetPeriod(30)">30d</button>
+            <button class="btn btn-xs" onclick="rpSetPeriod(0)">Mês</button>
+            <button class="btn btn-xs" onclick="rpSetPeriod(-1)">Tudo</button>
+          </div>
         </div>
         <button class="btn btn-sm btn-blue" onclick="renderRelatorioPessoa()">🔄 Atualizar</button>
       </div>
@@ -1814,7 +1759,7 @@ function go(tab) {
     allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
     renderHistoricoDisparos();
   }
-  if(tab==='relatoriopessoa') renderRelatorioPessoa();
+  if(tab==='relatoriopessoa') { rpInitDates(); renderRelatorioPessoa(); }
   if(tab==='agendamento') { renderAgendamentos(); populateAgTpls(); updAgPrev(); setTimeout(()=>syncAgSliders(),50); }
   if(tab==='config') renderConfig();
   if(tab==='numero') checkNum();
@@ -2186,7 +2131,6 @@ async function syncAllUsersLogs() {
   if(novosTotal > 0) {
     allLogs.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
     // Atualizar telas abertas
-    if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
     if(document.getElementById('panel-historicodisparos')?.classList.contains('show')) renderHistoricoDisparos();
     updBadges();
     console.log(`[GlobalSync] Total: +${novosTotal} logs de outros usuários`);
@@ -2420,7 +2364,10 @@ function delContato(id) {
   contacts = contacts.filter(c=>c.id!==id);
   listas.forEach(l=>{ l.contatos=l.contatos.filter(i=>i!==id); });
   crmData = crmData.filter(x=>x.contactId!==id);
-  renderC(); updBadges(); salvarDados();
+  invalidateDisparoCache();
+  _filterCacheKey='';
+  renderC(); updBadges();
+  salvarImediato(); // salvar imediatamente — não usar debounce
 }
 function clrAll() {
   showModal(`
@@ -2432,13 +2379,17 @@ function clrAll() {
     </div>
   `);
 }
-function _doClrAll(){
+async function _doClrAll(){
   contacts=[];listas=[];logs=[];crmData=[];fila=[];agendamentos=[];
+  chatLogs={};allLogs=[];
   invalidateDisparoCache();
   _filterCacheKey='';
-  renderC();renderListas();renderCRM();renderLogs();updBadges();
-  salvarImediato();
-  closeModal();toast('Base de dados limpa');
+  renderC();renderListas();renderCRM();updBadges();
+  closeModal();
+  toast('Salvando...');
+  // Aguardar o save completar ANTES de qualquer reload
+  await salvarImediato();
+  toast('Base de dados limpa ✓');
 }
 
 // ── IMPORTAR ──
@@ -2481,93 +2432,134 @@ function _doImport() {
 
 function processFile(file, listaId) {
   const r = new FileReader();
+  r.onerror = () => toast('Erro ao ler o arquivo','err');
   r.onload = function(e) {
-    const wb = XLSX.read(e.target.result, {type:'binary'});
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    let data = XLSX.utils.sheet_to_json(ws, {defval:''});
-    data = data.filter(row=>{
-      const vals = Object.values(row).map(v=>String(v).toLowerCase());
-      return !vals.some(v=>v.startsWith('ex:')||v.includes('deixe vazio'));
-    });
-
-    // Montar mapa de logs por telefone (para cruzamento)
-    const logMap = {}; // tel → { status, time, msg }
-    logs.forEach(l => {
-      const tel = (l.tel||'').replace(/\D/g,'');
-      if(!tel) return;
-      if(!logMap[tel] || l.time > logMap[tel].time) {
-        logMap[tel] = { status: l.status, time: l.time, msg: l.msg||'' };
+    try {
+      let data = [];
+      const isCSV = file.name?.toLowerCase().endsWith('.csv');
+      if(isCSV) {
+        const text = e.target.result;
+        const lines = text.split(/\r?\n/).filter(l=>l.trim());
+        if(!lines.length){ toast('Arquivo CSV vazio','warn'); return; }
+        const sep = lines[0].includes(';') ? ';' : ',';
+        const headers = lines[0].split(sep).map(h=>h.trim().toLowerCase().replace(/[\'"]/g,''));
+        for(let i=1;i<lines.length;i++){
+          const vals = lines[i].split(sep).map(v=>v.trim().replace(/^["\'"]|["\'"]$/g,''));
+          if(!vals.join('').trim()) continue;
+          const row={};
+          headers.forEach((h,j)=>{ row[h]=vals[j]||''; });
+          data.push(row);
+        }
+      } else {
+        const wb = XLSX.read(e.target.result, {type:'binary', raw:false});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        data = XLSX.utils.sheet_to_json(ws, {defval:'', raw:false});
       }
-    });
-    const getLogStatus = (tel) => {
-      const t = tel.replace(/\D/g,'');
-      return logMap[t] || logMap[t.replace(/^55/,'')] || logMap['55'+t] || null;
-    };
 
-    let added=0, dup=0, jaEnviado=0, atualizado=0;
+      data = data.filter(row=>{
+        const vals = Object.values(row).map(v=>String(v).toLowerCase());
+        return !vals.some(v=>v.startsWith('ex:')||v.includes('deixe vazio'));
+      });
 
-    data.forEach((row,i)=>{
-      const keys = Object.keys(row).map(k=>k.toLowerCase());
-      const gv = (...names) => {
-        for(const n of names){
-          const k = keys.find(k=>k.includes(n));
-          if(k) return String(row[Object.keys(row)[keys.indexOf(k)]]||'').trim();
+      console.log('[Import]', data.length, 'linhas. Colunas:', data[0]?Object.keys(data[0]):[]);
+      if(!data.length){ toast('Nenhum dado encontrado no arquivo','warn'); return; }
+
+      // Detectar coluna de telefone
+      const TEL_KEYS = ['tel','fone','phone','cel','whats','telefone','celular','numero','contact','mobile','zap'];
+      const firstKeys = Object.keys(data[0]||{});
+      const lowerFirst = firstKeys.map(k=>k.toLowerCase());
+      let telKey = null;
+      for(const tk of TEL_KEYS){
+        const idx = lowerFirst.findIndex(k=>k.includes(tk));
+        if(idx>=0){ telKey = firstKeys[idx]; break; }
+      }
+      // Fallback: primeira coluna com valor parecendo telefone
+      if(!telKey){
+        for(const k of firstKeys){
+          const v = String(data[0][k]||'').replace(/\D/g,'');
+          if(v.length>=8){ telKey=k; break; }
         }
-        return '';
-      };
-      let tel = gv('tel','fone','phone','cel','whats').replace(/\D/g,'');
-      if(!tel) return;
-      if(tel.length===10||tel.length===11) tel='55'+tel;
-      if(tel.length<10) return;
-
-      const logInfo = getLogStatus(tel);
-      const statusFinal = logInfo?.status === 'enviado' ? 'enviado'
-                        : logInfo?.status === 'falha'   ? 'falha'
-                        : 'pendente';
-
-      const existe = contacts.find(c=>c.tel===tel);
-      if(existe) {
-        // Contato duplicado — atualizar status se necessário
-        const prioridade = { 'enviado':3, 'falha':2, 'pendente':1, '':0 };
-        if((prioridade[statusFinal]||0) > (prioridade[existe.status]||0)) {
-          existe.status = statusFinal;
-          atualizado++;
-        }
-        // Adicionar à lista se não estiver
-        if(listaId){ const l=listas.find(l=>l.id===listaId); if(l&&!l.contatos.includes(existe.id)) l.contatos.push(existe.id); }
-        dup++;
+      }
+      console.log('[Import] Coluna telefone:', telKey);
+      if(!telKey){
+        toast('Coluna de telefone não encontrada. Use: tel, telefone, celular, fone','err');
         return;
       }
 
-      const c = {
-        id: Date.now()+i,
-        tel, nome:gv('nome','name'),
-        empresa:gv('empresa','company','razao'),
-        cidade:gv('cidade','city','municipio'),
-        obs:gv('obs','observ','note'),
-        responsavel: window._pendingImportResp||'',
-        status: statusFinal,
-        addedAt: Date.now()
-      };
-      if(statusFinal === 'enviado') jaEnviado++;
-      contacts.push(c);
-      if(listaId){ const l=listas.find(l=>l.id===listaId); if(l)l.contatos.push(c.id); }
-      added++;
-    });
+      // Mapa de logs por telefone
+      const logMap={};
+      logs.forEach(l=>{
+        const t=(l.tel||'').replace(/\D/g,'');
+        if(t&&(!logMap[t]||l.time>logMap[t].time)) logMap[t]=l;
+      });
+      const getLogStatus=t=>logMap[t]||logMap[t.replace(/^55/,'')]||logMap['55'+t]||null;
 
-    invalidateDisparoCache();
-    _filterCacheKey = '';
-    salvarImediato().then(()=>{
-      renderC(); updBadges();
-      let msg = `✅ ${added} importado(s)`;
-      if(jaEnviado)  msg += ` · ${jaEnviado} já enviado(s)`;
-      if(atualizado) msg += ` · ${atualizado} status atualizado(s)`;
-      if(dup)        msg += ` · ${dup} duplicado(s)`;
-      toast(msg);
-    });
+      let added=0,dup=0,jaEnviado=0,atualizado=0,invalido=0;
+      const rowKeys=Object.keys(data[0]||{});
+      const lowerKeys=rowKeys.map(k=>k.toLowerCase());
+      const gv=(row,...names)=>{
+        for(const n of names){
+          const idx=lowerKeys.findIndex(k=>k.includes(n));
+          if(idx>=0) return String(row[rowKeys[idx]]||'').trim();
+        }
+        return '';
+      };
+
+      data.forEach((row,i)=>{
+        let tel=String(row[telKey]||'').replace(/\D/g,'');
+        if(!tel){invalido++;return;}
+        if(tel.length===10||tel.length===11) tel='55'+tel;
+        if(tel.length<10){invalido++;return;}
+
+        const logInfo=getLogStatus(tel);
+        const statusFinal=logInfo?.status==='enviado'?'enviado':logInfo?.status==='falha'?'falha':'pendente';
+
+        const existe=contacts.find(c=>(c.tel||'').replace(/\D/g,'')===(tel||'').replace(/\D/g,''));
+        if(existe){
+          const prio={'enviado':3,'falha':2,'pendente':1,'':0};
+          if((prio[statusFinal]||0)>(prio[existe.status]||0)){existe.status=statusFinal;atualizado++;}
+          if(listaId){const l=listas.find(l=>l.id===listaId);if(l&&!l.contatos.includes(existe.id))l.contatos.push(existe.id);}
+          dup++;return;
+        }
+
+        const c={
+          id:Date.now()+i+Math.random(),
+          tel,
+          nome:    gv(row,'nome','name','razao social')||'',
+          empresa: gv(row,'empresa','company','razao','fantasia')||'',
+          cidade:  gv(row,'cidade','city','municipio','localidade')||'',
+          obs:     gv(row,'obs','observ','note','comentario')||'',
+          responsavel: window._pendingImportResp||'',
+          status: statusFinal,
+          addedAt: Date.now()
+        };
+        if(statusFinal==='enviado') jaEnviado++;
+        contacts.push(c);
+        if(listaId){const l=listas.find(l=>l.id===listaId);if(l)l.contatos.push(c.id);}
+        added++;
+      });
+
+      console.log('[Import] Resultado: +'+added+' dup:'+dup+' inv:'+invalido);
+      invalidateDisparoCache();
+      _filterCacheKey='';
+      salvarImediato().then(()=>{
+        renderC(); updBadges();
+        let msg=`✅ ${added} importado(s)`;
+        if(jaEnviado)  msg+=` · ${jaEnviado} já enviado(s)`;
+        if(atualizado) msg+=` · ${atualizado} status atualizado(s)`;
+        if(dup)        msg+=` · ${dup} duplicado(s)`;
+        if(invalido)   msg+=` · ${invalido} ignorado(s)`;
+        toast(msg);
+      });
+    } catch(err) {
+      console.error('[Import] Erro:', err);
+      toast('Erro ao processar arquivo: '+err.message,'err');
+    }
   };
-  r.readAsBinaryString(file);
+  if(file.name?.toLowerCase().endsWith('.csv')) r.readAsText(file,'UTF-8');
+  else r.readAsBinaryString(file);
 }
+
 
 function openAddModal() {
   showModal(`
@@ -2824,7 +2816,6 @@ async function doSendMsg(cId, text) {
     if(chatContact?.id===cId) renderChatHistory();
     renderChatList();
     updBadges();
-    if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
   } catch(e) {
     toast('Erro de conexão: '+e.message,'err');
   }
@@ -3187,7 +3178,6 @@ async function fireNext() {
   // Atualizar UI em tempo real
   salvarDados();
   // Relatório
-  if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
   // Contatos — atualizar status do contato atual na tabela sem rerender tudo
   _updateContactRowStatus(cId, sucesso?'enviado':'falha');
   // Histórico de disparos
@@ -3774,7 +3764,8 @@ function toggleLista(id) {
 }
 function excluirLista(id) {
   listas=listas.filter(l=>l.id!==id);
-  salvarDados(); renderListas(); updBadges(); toast('Lista removida');
+  _filterCacheKey='';
+  salvarImediato(); renderListas(); updBadges(); toast('Lista removida');
 }
 function remDaLista(listaId, cId) {
   const l=listas.find(x=>x.id===listaId);
@@ -4860,8 +4851,41 @@ function _doChangePwdSelf() {
 }
 
 // ── HISTÓRICO DE DISPAROS ──
+// Atalhos de período para o Relatório por Pessoa
+function rpSetPeriod(days) {
+  const now = new Date();
+  const toEl   = document.getElementById('rp-date-to');
+  const fromEl = document.getElementById('rp-date-from');
+  if(!toEl||!fromEl) return;
+
+  const fmt = d => d.toISOString().slice(0,10);
+  toEl.value = fmt(now);
+
+  if(days === -1) {
+    // Todo o período — limpar data início
+    fromEl.value = '';
+  } else if(days === 0) {
+    // Mês atual
+    fromEl.value = fmt(new Date(now.getFullYear(), now.getMonth(), 1));
+  } else {
+    fromEl.value = fmt(new Date(now - days*24*3600*1000));
+  }
+  renderRelatorioPessoa();
+}
+
+// Inicializar datas padrão (últimos 30 dias)
+function rpInitDates() {
+  const toEl   = document.getElementById('rp-date-to');
+  const fromEl = document.getElementById('rp-date-from');
+  if(!toEl||!fromEl||toEl.value) return; // já inicializado
+  const now = new Date();
+  toEl.value   = now.toISOString().slice(0,10);
+  fromEl.value = new Date(now - 30*24*3600*1000).toISOString().slice(0,10);
+}
+
 // ── RELATÓRIO POR PESSOA ──
 function renderRelatorioPessoa() {
+  rpInitDates(); // garantir datas inicializadas
   const users = getUsers();
 
   // Popular select — sempre atualizar
@@ -4873,13 +4897,17 @@ function renderRelatorioPessoa() {
   }
 
   const selUserKey = document.getElementById('rp-user')?.value || '';
-  const periodDays = parseInt(document.getElementById('rp-period')?.value || '30');
+  const dateFrom   = document.getElementById('rp-date-from')?.value || '';
+  const dateTo     = document.getElementById('rp-date-to')?.value || '';
 
-  // Fonte de logs — todos disponíveis
+  // Converter datas para ms
+  const msFrom = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : 0;
+  const msTo   = dateTo   ? new Date(dateTo   + 'T23:59:59').getTime() : Date.now();
+
+  // Fonte de logs
   const srcLogs = allLogs.length ? allLogs : logs.map(l=>({...l, _owner: currentUser?.name||'', enviadoPor: l.enviadoPor||currentUser?.name||''}));
 
   // ── Parse de data robusto ──
-  // Formato esperado: "dd/mm/yyyy, hh:mm:ss" ou "dd/mm/yyyy hh:mm:ss"
   function parseLogDate(l) {
     try {
       const t = (l.time||'').replace(',','');
@@ -4890,14 +4918,13 @@ function renderRelatorioPessoa() {
     } catch(e) { return null; }
   }
 
-  const now       = new Date();
-  const todayStr  = `${now.getDate()}/${now.getMonth()+1}/${now.getFullYear()}`;
-  const cutoffMs  = periodDays > 0 ? (Date.now() - periodDays*24*3600*1000) : 0;
+  const now = new Date();
 
   function inPeriod(l) {
-    if(!cutoffMs) return true;
     const d = parseLogDate(l);
-    return d ? d.getTime() >= cutoffMs : true;
+    if(!d) return true;
+    const ms = d.getTime();
+    return ms >= msFrom && ms <= msTo;
   }
   function isToday(l) {
     const d = parseLogDate(l);
@@ -4907,8 +4934,7 @@ function renderRelatorioPessoa() {
   function isThisWeek(l) {
     const d = parseLogDate(l);
     if(!d) return false;
-    const diff = (now - d) / (1000*3600*24);
-    return diff >= 0 && diff < 7;
+    return (now - d) / (1000*3600*24) < 7;
   }
   function isThisMonth(l) {
     const d = parseLogDate(l);
@@ -5026,13 +5052,14 @@ function renderRelatorioPessoa() {
     const av = u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
     const taxaCls = taxa>=80?'badge-green':taxa>=50?'badge-amber':'badge-red';
 
+    const periodoLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : dateFrom ? `a partir de ${dateFrom}` : 'todo o período';
     return `
       <div style="background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
           <div class="user-av" style="width:36px;height:36px;font-size:12px;flex-shrink:0">${av}</div>
           <div style="flex:1">
             <div style="font-weight:700;font-size:15px">${esc(u.name)}</div>
-            <div style="font-size:11px;color:var(--t3)">${u.role||'Usuário'} · ${total} envios no total</div>
+            <div style="font-size:11px;color:var(--t3)">${u.role||'Usuário'} · ${total} envios no total · ${periodoLabel}</div>
           </div>
           <span class="badge ${taxaCls}" style="font-size:12px">${taxa}% sucesso</span>
         </div>
@@ -5623,8 +5650,7 @@ async function syncDadosBanco() {
     if(logsNovos.length > 0) {
       logs = mergeLogs(logs, d.logs||[]);
       invalidateDisparoCache();
-            if(document.getElementById('panel-relatorio')?.classList.contains('show')) renderLogs();
-      if(document.getElementById('panel-historicodisparos')?.classList.contains('show')) renderHistoricoDisparos();
+              if(document.getElementById('panel-historicodisparos')?.classList.contains('show')) renderHistoricoDisparos();
       updBadges();
     }
 
